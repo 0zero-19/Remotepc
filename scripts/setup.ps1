@@ -1,10 +1,5 @@
 # =============================================================================
-# ClassroomMonitor — Автоматическая установка зависимостей
-#
-# Запуск:
-#   .\scripts\setup.ps1
-#
-# Устанавливает: CMake, Qt6, проверяет Visual Studio
+# ClassroomMonitor — Dependency Setup & Check
 # =============================================================================
 
 param(
@@ -14,93 +9,94 @@ param(
     [switch]$SkipCMake
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 function Write-Step($message) {
-    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  $message" -ForegroundColor Cyan
-    Write-Host "========================================`n" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
 }
 
 function Test-Command($command) {
-    try { Get-Command $command -ErrorAction Stop; return $true }
+    try { Get-Command $command -ErrorAction Stop | Out-Null; return $true }
     catch { return $false }
 }
 
-# --- Проверка Visual Studio ---
-Write-Step "Проверка Visual Studio 2022"
-$vsPath = "C:\Program Files\Microsoft Visual Studio\2022"
-if (Test-Path $vsPath) {
-    $edition = (Get-ChildItem $vsPath -Directory | Select-Object -First 1).Name
-    Write-Host "  ✅ Visual Studio 2022 $edition найден" -ForegroundColor Green
+# --- 1. Check Visual Studio C++ Compiler ---
+Write-Step "1. Checking Visual Studio C++ Tools"
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$hasCpp = $false
+
+if (Test-Path $vsWhere) {
+    $vsCppPath = (& $vsWhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+    if ($vsCppPath) {
+        Write-Host "  [OK] Visual Studio C++ (MSVC) is installed at: $vsCppPath" -ForegroundColor Green
+        $hasCpp = $true
+    } else {
+        Write-Host "  [!] Visual Studio is installed, but 'Desktop development with C++' is MISSING." -ForegroundColor Yellow
+        Write-Host "  Action needed:" -ForegroundColor Yellow
+        Write-Host "  1. Open Visual Studio Installer" -ForegroundColor Cyan
+        Write-Host "  2. Click 'Modify' (Изменить) on Visual Studio 2022" -ForegroundColor Cyan
+        Write-Host "  3. Check 'Desktop development with C++' (Разработка классических приложений на C++)" -ForegroundColor Cyan
+        Write-Host "  4. Click 'Modify' in bottom right corner to install." -ForegroundColor Cyan
+    }
 } else {
-    Write-Host "  ❌ Visual Studio 2022 не найден!" -ForegroundColor Red
-    Write-Host "  Скачайте: https://visualstudio.microsoft.com/downloads/" -ForegroundColor Yellow
-    Write-Host "  Установите workload 'Desktop development with C++'" -ForegroundColor Yellow
-    exit 1
+    Write-Host "  [X] Visual Studio 2022 Installer not found!" -ForegroundColor Red
+    Write-Host "  Please download from: https://visualstudio.microsoft.com/downloads/" -ForegroundColor Yellow
 }
 
-# --- Установка CMake ---
+# --- 2. Check CMake ---
 if (-not $SkipCMake) {
-    Write-Step "Установка CMake"
+    Write-Step "2. Checking CMake"
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Test-Command "cmake") {
         $cmakeVer = (cmake --version | Select-Object -First 1)
-        Write-Host "  ✅ CMake уже установлен: $cmakeVer" -ForegroundColor Green
+        Write-Host "  [OK] $cmakeVer" -ForegroundColor Green
     } else {
-        Write-Host "  📦 Устанавливаю CMake через winget..." -ForegroundColor Yellow
+        Write-Host "  Installing CMake via winget..." -ForegroundColor Yellow
         winget install Kitware.CMake --accept-package-agreements --accept-source-agreements
-        # Обновляем PATH для текущей сессии
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-        Write-Host "  ✅ CMake установлен" -ForegroundColor Green
+        Write-Host "  [OK] CMake installed" -ForegroundColor Green
     }
 }
 
-# --- Установка Qt6 ---
+# --- 3. Check Qt6 ---
 if (-not $SkipQt) {
-    Write-Step "Установка Qt $QtVersion"
+    Write-Step "3. Checking Qt $QtVersion"
     $qtBinPath = "$QtPath\$QtVersion\msvc2019_64\bin"
 
     if (Test-Path $qtBinPath) {
-        Write-Host "  ✅ Qt $QtVersion уже установлен в $QtPath" -ForegroundColor Green
+        Write-Host "  [OK] Qt $QtVersion is installed at $QtPath" -ForegroundColor Green
     } else {
-        # Проверяем pip/python
+        Write-Host "  Qt $QtVersion not found at $QtPath. Installing..." -ForegroundColor Yellow
         if (-not (Test-Command "pip")) {
-            Write-Host "  ❌ Python/pip не найден! Установите Python 3.x" -ForegroundColor Red
-            exit 1
-        }
-
-        Write-Host "  📦 Устанавливаю aqtinstall..." -ForegroundColor Yellow
-        pip install aqtinstall
-
-        $aqtPath = "$env:APPDATA\Python\Python312\Scripts\aqt.exe"
-        if (-not (Test-Path $aqtPath)) {
-            $aqtPath = "aqt"  # Попробуем из PATH
-        }
-
-        Write-Host "  📦 Скачиваю Qt $QtVersion (это займёт несколько минут)..." -ForegroundColor Yellow
-        & $aqtPath install-qt windows desktop $QtVersion win64_msvc2019_64 -O $QtPath --modules qtnetworkauth
-
-        if (Test-Path $qtBinPath) {
-            Write-Host "  ✅ Qt $QtVersion установлен в $QtPath" -ForegroundColor Green
+            Write-Host "  [X] Python/pip not found. Please install Python 3.x" -ForegroundColor Red
         } else {
-            Write-Host "  ❌ Ошибка установки Qt!" -ForegroundColor Red
-            exit 1
+            pip install aqtinstall
+            $aqtExe = "aqt"
+            & $aqtExe install-qt windows desktop $QtVersion win64_msvc2019_64 -O $QtPath --modules qtnetworkauth
+            if (Test-Path $qtBinPath) {
+                Write-Host "  [OK] Qt $QtVersion installed at $QtPath" -ForegroundColor Green
+            } else {
+                Write-Host "  [X] Qt installation failed." -ForegroundColor Red
+            }
         }
     }
 
-    # Устанавливаем переменную окружения
     [System.Environment]::SetEnvironmentVariable("CMAKE_PREFIX_PATH", "$QtPath\$QtVersion\msvc2019_64", "User")
     $env:CMAKE_PREFIX_PATH = "$QtPath\$QtVersion\msvc2019_64"
-    Write-Host "  📝 CMAKE_PREFIX_PATH = $env:CMAKE_PREFIX_PATH" -ForegroundColor Gray
+    Write-Host "  CMAKE_PREFIX_PATH set to: $env:CMAKE_PREFIX_PATH" -ForegroundColor Gray
 }
 
-# --- Итог ---
-Write-Step "Установка завершена!"
-Write-Host "  Для сборки проекта выполните:" -ForegroundColor White
-Write-Host ""
-Write-Host '    cmake -S . -B build --preset=debug' -ForegroundColor Yellow
-Write-Host '    cmake --build build --config Debug' -ForegroundColor Yellow
-Write-Host ""
-Write-Host "  Или в Visual Studio:" -ForegroundColor White
-Write-Host "    File → Open → CMake... → выберите CMakeLists.txt" -ForegroundColor Yellow
-Write-Host ""
+# --- Summary ---
+Write-Step "Summary"
+if ($hasCpp) {
+    Write-Host "  Ready to build! Run:" -ForegroundColor Green
+    Write-Host "    .\build.bat" -ForegroundColor Yellow
+    Write-Host "    .\run_teacher.bat" -ForegroundColor Yellow
+} else {
+    Write-Host "  Please finish installing 'Desktop development with C++' in Visual Studio Installer," -ForegroundColor Yellow
+    Write-Host "  then run .\build.bat" -ForegroundColor Yellow
+}
