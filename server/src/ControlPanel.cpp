@@ -22,7 +22,7 @@ void ControlPanel::setupUi() {
     layout->setContentsMargins(8, 4, 8, 4);
 
     // Кнопка блокировки
-    m_lockBtn = new QPushButton("🔒 Заблокировать всех", this);
+    m_lockBtn = new QPushButton("Заблокировать всех", this);
     m_lockBtn->setStyleSheet(
         "QPushButton {"
         "  background-color: #e94560;"
@@ -40,7 +40,7 @@ void ControlPanel::setupUi() {
     layout->addWidget(m_lockBtn);
 
     // Кнопка разблокировки
-    m_unlockBtn = new QPushButton("🔓 Разблокировать всех", this);
+    m_unlockBtn = new QPushButton("Разблокировать всех", this);
     m_unlockBtn->setStyleSheet(
         "QPushButton {"
         "  background-color: #4caf50;"
@@ -75,13 +75,13 @@ void ControlPanel::setupUi() {
 }
 
 void ControlPanel::onLockAll() {
-    m_statusLabel->setText("🔒 Заблокировано");
+    m_statusLabel->setText("Заблокировано");
     m_statusLabel->setStyleSheet("color: #e94560; font-size: 12px;");
     emit commandIssued("lock_all");
 }
 
 void ControlPanel::onUnlockAll() {
-    m_statusLabel->setText("🔓 Разблокировано");
+    m_statusLabel->setText("Разблокировано");
     m_statusLabel->setStyleSheet("color: #4caf50; font-size: 12px;");
     emit commandIssued("unlock_all");
 }
