@@ -137,12 +137,19 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
 
         if (received <= 0) {
             if (received == 0) {
-                std::cout << "[Agent] Server closed connection" << std::endl;
-            } else {
-                int err = WSAGetLastError();
-                if (err != WSAETIMEDOUT && err != WSAECONNRESET) {
-                    std::cerr << "[Agent] recv error: " << err << std::endl;
-                }
+                std::cout << "[Agent] Сервер закрыл TCP-соединение" << std::endl;
+                g_running.store(false);
+                break;
+            }
+
+            int err = WSAGetLastError();
+            if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK) {
+                // Обычный таймаут ожидания входящих команд от преподавателя - продолжаем слушать
+                continue;
+            }
+
+            if (err != WSAECONNRESET) {
+                std::cerr << "[Agent] Ошибка TCP-соединения: " << err << std::endl;
             }
             g_running.store(false);
             break;
@@ -161,12 +168,12 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
         switch (type) {
             case PacketType::LOCK_INPUT:
                 lockMgr.lock();
-                std::cout << "[Agent] >>> Input LOCKED by teacher" << std::endl;
+                std::cout << "[Agent] >>> Экран ЗАБЛОКИРОВАН преподавателем" << std::endl;
                 break;
 
             case PacketType::UNLOCK_INPUT:
                 lockMgr.unlock();
-                std::cout << "[Agent] >>> Input UNLOCKED by teacher" << std::endl;
+                std::cout << "[Agent] >>> Экран РАЗБЛОКИРОВАН преподавателем" << std::endl;
                 break;
 
             case PacketType::MOUSE_MOVE:
@@ -178,7 +185,7 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
                 break;
 
             case PacketType::SHUTDOWN_AGENT:
-                std::cout << "[Agent] Shutdown requested by server" << std::endl;
+                std::cout << "[Agent] Запрошено завершение работы от сервера" << std::endl;
                 g_running.store(false);
                 break;
 
@@ -212,8 +219,12 @@ void heartbeatThread(SOCKET tcpSocket) {
         int res = send(tcpSocket, reinterpret_cast<const char*>(packet.data()),
                        static_cast<int>(packet.size()), 0);
         if (res <= 0) {
-            g_running.store(false);
-            break;
+            int err = WSAGetLastError();
+            if (err != 0 && err != WSAEWOULDBLOCK) {
+                std::cerr << "[Agent] Ошибка отправки Heartbeat: " << err << std::endl;
+                g_running.store(false);
+                break;
+            }
         }
 
         std::this_thread::sleep_for(
