@@ -36,17 +36,33 @@ void ClientSession::onDataReady() {
         PacketHeader header;
         if (!parseHeader(reinterpret_cast<const uint8_t*>(m_receiveBuffer.constData()),
                          m_receiveBuffer.size(), header)) {
-            // Невалидные данные — очищаем буфер
-            m_receiveBuffer.clear();
-            break;
+            // Не совпал magic number — ищем следующий magic в буфере
+            int magicPos = -1;
+            for (int i = 1; i <= m_receiveBuffer.size() - static_cast<int>(sizeof(uint32_t)); ++i) {
+                uint32_t val;
+                std::memcpy(&val, m_receiveBuffer.constData() + i, sizeof(uint32_t));
+                if (val == PROTOCOL_MAGIC) {
+                    magicPos = i;
+                    break;
+                }
+            }
+
+            if (magicPos > 0) {
+                m_receiveBuffer.remove(0, magicPos);
+                continue;
+            } else {
+                m_receiveBuffer.clear();
+                break;
+            }
         }
 
         int totalPacketSize = static_cast<int>(sizeof(PacketHeader) + header.payloadSize);
         if (m_receiveBuffer.size() < totalPacketSize) {
-            break;  // Пакет ещё не полностью получен
+            // Пакет получен не полностью — ждём следующие данные из сокета
+            break;
         }
 
-        // Извлекаем пакет
+        // Извлекаем полный пакет
         QByteArray packet = m_receiveBuffer.left(totalPacketSize);
         m_receiveBuffer.remove(0, totalPacketSize);
 

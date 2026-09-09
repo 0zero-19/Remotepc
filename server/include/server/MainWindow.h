@@ -14,6 +14,7 @@
 #include "server/StudentTile.h"
 #include "server/ClientSession.h"
 #include "server/ControlPanel.h"
+#include "server/StudentViewDialog.h"
 
 class QTcpServer;
 class QUdpSocket;
@@ -65,7 +66,8 @@ private:
     ControlPanel* m_controlPanel  = nullptr;
 
     // Тайлы студентов (clientId → tile)
-    QMap<uint32_t, StudentTile*>   m_tiles;
+    QMap<uint32_t, StudentTile*>       m_tiles;
+    QMap<uint32_t, StudentViewDialog*> m_viewDialogs;
 
     // Heartbeat
     QTimer* m_heartbeatTimer = nullptr;

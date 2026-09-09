@@ -150,10 +150,13 @@ void MainWindow::onNewConnection() {
                     .arg(m_localIps));
         });
 
-        // При получении видеокадров по TCP обновляем тайл
-        connect(session, &ClientSession::videoFrameReceived, this, [tile](uint32_t, const QByteArray& frameData, uint16_t w, uint16_t h) {
+        // При получении видеокадров по TCP обновляем тайл и диалог
+        connect(session, &ClientSession::videoFrameReceived, this, [this, clientId, tile](uint32_t, const QByteArray& frameData, uint16_t w, uint16_t h) {
             tile->updateFrame(reinterpret_cast<const uint8_t*>(frameData.constData()),
                               frameData.size(), w, h);
+            if (auto* dlg = m_viewDialogs.value(clientId, nullptr)) {
+                dlg->updateFrame(frameData, w, h);
+            }
         });
 
         updateGrid();
@@ -205,12 +208,22 @@ void MainWindow::onVideoDataReady() {
 
             tileIt.value()->updateFrame(frameData, frameSize,
                                          frameHeader.width, frameHeader.height);
+
+            if (auto* dlg = m_viewDialogs.value(frameHeader.clientId, nullptr)) {
+                dlg->updateFrame(QByteArray(reinterpret_cast<const char*>(frameData), static_cast<int>(frameSize)),
+                                 frameHeader.width, frameHeader.height);
+            }
         }
     }
 }
 
 void MainWindow::onClientDisconnected(uint32_t clientId) {
     qDebug() << "[Server] Client disconnected:" << clientId;
+
+    if (auto* dlg = m_viewDialogs.value(clientId, nullptr)) {
+        dlg->close();
+        m_viewDialogs.remove(clientId);
+    }
 
     // Удаляем тайл
     auto tileIt = m_tiles.find(clientId);
@@ -249,7 +262,24 @@ void MainWindow::onHeartbeatCheck() {
 
 void MainWindow::onStudentTileClicked(uint32_t clientId) {
     qDebug() << "[Server] Tile clicked:" << clientId;
-    // TODO: открыть полноэкранный просмотр + удалённое управление
+    auto* session = m_sessions.value(clientId, nullptr);
+    if (!session) return;
+
+    if (auto* existingDlg = m_viewDialogs.value(clientId, nullptr)) {
+        existingDlg->raise();
+        existingDlg->activateWindow();
+        return;
+    }
+
+    auto* dlg = new StudentViewDialog(clientId, session, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    m_viewDialogs.insert(clientId, dlg);
+
+    connect(dlg, &QObject::destroyed, this, [this, clientId]() {
+        m_viewDialogs.remove(clientId);
+    });
+
+    dlg->show();
 }
 
 void MainWindow::onControlCommand(const QString& command) {

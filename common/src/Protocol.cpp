@@ -49,11 +49,6 @@ bool parseHeader(const uint8_t* data, size_t size, PacketHeader& outHeader) {
         return false;
     }
 
-    // Проверяем что payloadSize не выходит за пределы буфера
-    if (sizeof(PacketHeader) + outHeader.payloadSize > size) {
-        return false;
-    }
-
     return true;
 }
 

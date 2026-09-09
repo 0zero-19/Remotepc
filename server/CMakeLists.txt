@@ -14,10 +14,12 @@ add_executable(TeacherPanel
     src/StudentTile.cpp
     src/ClientSession.cpp
     src/ControlPanel.cpp
+    src/StudentViewDialog.cpp
     include/server/MainWindow.h
     include/server/StudentTile.h
     include/server/ClientSession.h
     include/server/ControlPanel.h
+    include/server/StudentViewDialog.h
 )
 
 target_include_directories(TeacherPanel
