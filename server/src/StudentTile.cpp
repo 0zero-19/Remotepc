@@ -71,15 +71,26 @@ void StudentTile::setupUi() {
 
 void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
                                uint16_t width, uint16_t height) {
-    Q_UNUSED(frameData);
-    m_screenLabel->setText(QString("📺 %1x%2\n[Поток активен (%3 КБ)]")
-        .arg(width).arg(height).arg(size / 1024));
-    m_screenLabel->setStyleSheet(
-        "background-color: #0d1b2a; "
-        "border-radius: 6px; "
-        "color: #00e676; "
-        "font-weight: bold;"
-    );
+    if (!frameData || size == 0) return;
+
+    QImage img;
+    if (img.loadFromData(frameData, static_cast<int>(size), "JPEG") ||
+        img.loadFromData(frameData, static_cast<int>(size))) {
+        QPixmap pixmap = QPixmap::fromImage(img).scaled(
+            m_screenLabel->size(),
+            Qt::KeepAspectRatio,
+            Qt::SmoothTransformation
+        );
+        m_screenLabel->setPixmap(pixmap);
+        m_screenLabel->setStyleSheet(
+            "background-color: #000000; "
+            "border-radius: 6px;"
+        );
+    } else {
+        // Запасной вывод текстовой информации если формат не распознан
+        m_screenLabel->setText(QString("📺 %1x%2\n[Поток: %3 КБ]")
+            .arg(width).arg(height).arg(size / 1024));
+    }
 }
 
 void StudentTile::setStudentName(const QString& name) {

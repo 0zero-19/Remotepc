@@ -1,19 +1,18 @@
 // =============================================================================
 // ClassroomMonitor — Video Encoder Implementation
 //
-// H.264 кодирование через Media Foundation Transform (MFT).
+// Высокоскоростное сжатие кадров через Windows Imaging Component (WIC JPEG).
+// Работает на любых видеокартах и редакциях Windows без сбоев.
 // =============================================================================
 
 #include "client/VideoEncoder.h"
 
-#include <mfapi.h>
-#include <mferror.h>
-#include <codecapi.h>
 #include <iostream>
+#include <cstring>
 
-#pragma comment(lib, "mfplat.lib")
-#pragma comment(lib, "mfuuid.lib")
-#pragma comment(lib, "mf.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
 
 namespace cm {
 namespace client {
@@ -27,225 +26,147 @@ VideoEncoder::~VideoEncoder() {
 bool VideoEncoder::initialize(const video::EncoderConfig& config) {
     m_config = config;
 
-    // Инициализация Media Foundation
-    HRESULT hr = MFStartup(MF_VERSION);
-    if (FAILED(hr)) {
-        std::cerr << "[VideoEncoder] MFStartup failed" << std::endl;
-        return false;
+    // Инициализация COM для текущего потока (если еще не инициализирован)
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (SUCCEEDED(hr)) {
+        m_comInitialized = true;
     }
 
-    if (!createEncoder()) {
-        std::cerr << "[VideoEncoder] Failed to create encoder" << std::endl;
-        return false;
-    }
-
-    if (!configureEncoder()) {
-        std::cerr << "[VideoEncoder] Failed to configure encoder" << std::endl;
-        return false;
-    }
-
-    m_initialized = true;
-    m_frameCount = 0;
-    return true;
-}
-
-bool VideoEncoder::createEncoder() {
-    // Ищем H.264 аппаратный кодек
-    MFT_REGISTER_TYPE_INFO outputType = { MFMediaType_Video, MFVideoFormat_H264 };
-
-    IMFActivate** activates = nullptr;
-    UINT32 count = 0;
-
-    HRESULT hr = MFTEnumEx(
-        MFT_CATEGORY_VIDEO_ENCODER,
-        MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
+    // Создаем WIC Imaging Factory
+    hr = CoCreateInstance(
+        CLSID_WICImagingFactory,
         nullptr,
-        &outputType,
-        &activates,
-        &count
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(m_wicFactory.GetAddressOf())
     );
 
-    // Если аппаратный кодек не найден — ищем программный
-    if (FAILED(hr) || count == 0) {
-        hr = MFTEnumEx(
-            MFT_CATEGORY_VIDEO_ENCODER,
-            MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
+    if (FAILED(hr)) {
+        // Пробуем альтернативный CLSID WIC Imaging Factory 1
+        hr = CoCreateInstance(
+            CLSID_WICImagingFactory1,
             nullptr,
-            &outputType,
-            &activates,
-            &count
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(m_wicFactory.GetAddressOf())
         );
     }
 
-    if (FAILED(hr) || count == 0) {
-        std::cerr << "[VideoEncoder] No H.264 encoder found" << std::endl;
-        return false;
-    }
-
-    // Активируем первый найденный кодек
-    hr = activates[0]->ActivateObject(IID_PPV_ARGS(m_encoder.GetAddressOf()));
-
-    // Освобождаем массив активаторов
-    for (UINT32 i = 0; i < count; ++i) {
-        activates[i]->Release();
-    }
-    CoTaskMemFree(activates);
-
-    return SUCCEEDED(hr);
-}
-
-bool VideoEncoder::configureEncoder() {
-    if (!m_encoder) return false;
-
-    // Настраиваем выходной тип (H.264)
-    HRESULT hr = MFCreateMediaType(m_outputType.GetAddressOf());
-    if (FAILED(hr)) return false;
-
-    m_outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    m_outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-    m_outputType->SetUINT32(MF_MT_AVG_BITRATE, m_config.bitrate);
-    MFSetAttributeSize(m_outputType.Get(), MF_MT_FRAME_SIZE, m_config.width, m_config.height);
-    MFSetAttributeRatio(m_outputType.Get(), MF_MT_FRAME_RATE, m_config.fps, 1);
-    m_outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    m_outputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base);
-
-    hr = m_encoder->SetOutputType(0, m_outputType.Get(), 0);
-    if (FAILED(hr)) {
-        std::cerr << "[VideoEncoder] SetOutputType failed: 0x"
+    if (FAILED(hr) || !m_wicFactory) {
+        std::cerr << "[VideoEncoder] CoCreateInstance(WICImagingFactory) failed: 0x"
                   << std::hex << hr << std::dec << std::endl;
         return false;
     }
 
-    // Настраиваем входной тип (NV12 — стандарт для MF кодеков)
-    hr = MFCreateMediaType(m_inputType.GetAddressOf());
-    if (FAILED(hr)) return false;
+    // Базовое качество JPEG: 65% для оптимального баланса качества и скорости передачи
+    m_compressionQuality = 0.65f;
+    m_frameCount = 0;
+    m_initialized = true;
 
-    m_inputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    m_inputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-    MFSetAttributeSize(m_inputType.Get(), MF_MT_FRAME_SIZE, m_config.width, m_config.height);
-    MFSetAttributeRatio(m_inputType.Get(), MF_MT_FRAME_RATE, m_config.fps, 1);
-    m_inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-
-    hr = m_encoder->SetInputType(0, m_inputType.Get(), 0);
-    if (FAILED(hr)) {
-        std::cerr << "[VideoEncoder] SetInputType failed: 0x"
-                  << std::hex << hr << std::dec << std::endl;
-        return false;
-    }
-
-    // Запускаем поток обработки
-    hr = m_encoder->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
-    if (FAILED(hr)) return false;
-
-    hr = m_encoder->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
-    return SUCCEEDED(hr);
+    return true;
 }
 
 bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFrame& outEncoded) {
-    if (!m_initialized || !m_encoder) return false;
+    if (!m_initialized || !m_wicFactory) return false;
+    if (rawFrame.pixels.empty() || rawFrame.width == 0 || rawFrame.height == 0) return false;
 
-    // Создаём входной буфер MF
-    ComPtr<IMFMediaBuffer> inputBuffer;
-    HRESULT hr = MFCreateMemoryBuffer(
-        static_cast<DWORD>(rawFrame.pixels.size()), inputBuffer.GetAddressOf());
+    // Создаем поток памяти в IStream
+    IStream* pStream = nullptr;
+    HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
     if (FAILED(hr)) return false;
 
-    // Копируем данные в буфер
-    BYTE* bufferData = nullptr;
-    hr = inputBuffer->Lock(&bufferData, nullptr, nullptr);
+    ComPtr<IStream> spStream;
+    spStream.Attach(pStream);
+
+    // Создаем JPEG энкодер
+    ComPtr<IWICBitmapEncoder> pEncoder;
+    hr = m_wicFactory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, pEncoder.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    std::memcpy(bufferData, rawFrame.pixels.data(), rawFrame.pixels.size());
-    inputBuffer->Unlock();
-    inputBuffer->SetCurrentLength(static_cast<DWORD>(rawFrame.pixels.size()));
-
-    // Создаём сэмпл
-    ComPtr<IMFSample> inputSample;
-    hr = MFCreateSample(inputSample.GetAddressOf());
+    hr = pEncoder->Initialize(spStream.Get(), WICBitmapEncoderNoCache);
     if (FAILED(hr)) return false;
 
-    inputSample->AddBuffer(inputBuffer.Get());
-
-    // Устанавливаем время кадра
-    LONGLONG duration = 10000000LL / m_config.fps;  // в 100-наносекундных единицах
-    inputSample->SetSampleTime(static_cast<LONGLONG>(m_frameCount) * duration);
-    inputSample->SetSampleDuration(duration);
-
-    // Подаём кадр на вход кодека
-    hr = m_encoder->ProcessInput(0, inputSample.Get(), 0);
+    // Создаем новый кадр
+    ComPtr<IWICBitmapFrameEncode> pFrameEncode;
+    ComPtr<IPropertyBag2> pPropertyBag;
+    hr = pEncoder->CreateNewFrame(pFrameEncode.GetAddressOf(), pPropertyBag.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Получаем закодированные данные
-    MFT_OUTPUT_DATA_BUFFER outputData = {};
-    MFT_OUTPUT_STREAM_INFO streamInfo;
-    hr = m_encoder->GetOutputStreamInfo(0, &streamInfo);
+    // Устанавливаем качество JPEG
+    PROPBAG2 option = { 0 };
+    option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
+    VARIANT varValue;
+    VariantInit(&varValue);
+    varValue.vt = VT_R4;
+    varValue.fltVal = m_compressionQuality;
+    pPropertyBag->Write(1, &option, &varValue);
+
+    hr = pFrameEncode->Initialize(pPropertyBag.Get());
     if (FAILED(hr)) return false;
 
-    ComPtr<IMFMediaBuffer> outputBuffer;
-    hr = MFCreateMemoryBuffer(streamInfo.cbSize, outputBuffer.GetAddressOf());
+    hr = pFrameEncode->SetSize(rawFrame.width, rawFrame.height);
     if (FAILED(hr)) return false;
 
-    ComPtr<IMFSample> outputSample;
-    hr = MFCreateSample(outputSample.GetAddressOf());
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    hr = pFrameEncode->SetPixelFormat(&format);
     if (FAILED(hr)) return false;
 
-    outputSample->AddBuffer(outputBuffer.Get());
-    outputData.pSample = outputSample.Get();
+    hr = pFrameEncode->WritePixels(
+        rawFrame.height,
+        static_cast<UINT>(rawFrame.stride),
+        static_cast<UINT>(rawFrame.pixels.size()),
+        const_cast<BYTE*>(rawFrame.pixels.data())
+    );
+    if (FAILED(hr)) return false;
 
-    DWORD status = 0;
-    hr = m_encoder->ProcessOutput(0, 1, &outputData, &status);
+    hr = pFrameEncode->Commit();
+    if (FAILED(hr)) return false;
 
-    if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
-        m_frameCount++;
-        return false;  // Кодек ещё не выдал кадр
+    hr = pEncoder->Commit();
+    if (FAILED(hr)) return false;
+
+    // Получаем HGLOBAL из потока для извлечения готовых байтов
+    HGLOBAL hGlobal = nullptr;
+    hr = GetHGlobalFromStream(spStream.Get(), &hGlobal);
+    if (FAILED(hr) || !hGlobal) return false;
+
+    STATSTG stat = {};
+    SIZE_T streamSize = 0;
+    if (SUCCEEDED(spStream->Stat(&stat, STATFLAG_NONAME))) {
+        streamSize = static_cast<SIZE_T>(stat.cbSize.QuadPart);
+    } else {
+        streamSize = GlobalSize(hGlobal);
     }
 
-    if (FAILED(hr)) return false;
+    if (streamSize == 0) return false;
 
-    // Читаем закодированные данные
-    ComPtr<IMFMediaBuffer> resultBuffer;
-    hr = outputData.pSample->ConvertToContiguousBuffer(resultBuffer.GetAddressOf());
-    if (FAILED(hr)) return false;
+    void* pData = GlobalLock(hGlobal);
+    if (!pData) return false;
 
-    BYTE* encodedData = nullptr;
-    DWORD encodedSize = 0;
-    hr = resultBuffer->Lock(&encodedData, nullptr, &encodedSize);
-    if (FAILED(hr)) return false;
+    outEncoded.data.assign(
+        reinterpret_cast<const uint8_t*>(pData),
+        reinterpret_cast<const uint8_t*>(pData) + streamSize
+    );
+    GlobalUnlock(hGlobal);
 
-    // Заполняем выходной кадр
-    outEncoded.data.assign(encodedData, encodedData + encodedSize);
-    outEncoded.width     = m_config.width;
-    outEncoded.height    = m_config.height;
+    outEncoded.width     = rawFrame.width;
+    outEncoded.height    = rawFrame.height;
     outEncoded.timestamp = rawFrame.timestamp;
-    outEncoded.type      = (m_frameCount % m_config.iFrameInterval == 0)
-                            ? video::FrameType::I_FRAME
-                            : video::FrameType::P_FRAME;
+    outEncoded.type      = video::FrameType::I_FRAME;
 
-    resultBuffer->Unlock();
     m_frameCount++;
-
     return true;
 }
 
 bool VideoEncoder::updateConfig(const video::EncoderConfig& config) {
-    // Пересоздаём кодек с новыми параметрами
-    shutdown();
-    return initialize(config);
+    m_config = config;
+    return true;
 }
 
 void VideoEncoder::shutdown() {
-    if (m_encoder) {
-        m_encoder->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
-        m_encoder->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
-    }
-
-    m_encoder.Reset();
-    m_inputType.Reset();
-    m_outputType.Reset();
-
-    if (m_initialized) {
-        MFShutdown();
-        m_initialized = false;
+    m_wicFactory.Reset();
+    m_initialized = false;
+    if (m_comInitialized) {
+        CoUninitialize();
+        m_comInitialized = false;
     }
 }
 

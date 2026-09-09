@@ -30,6 +30,11 @@ target_link_libraries(StudentAgent
         mf
         mfreadwrite
 
+        # Windows Imaging Component & COM
+        windowscodecs
+        ole32
+        oleaut32
+
         # Win32
         user32
         gdi32

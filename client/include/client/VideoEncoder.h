@@ -2,16 +2,12 @@
 // =============================================================================
 // ClassroomMonitor — Video Encoder
 //
-// H.264 кодирование через Windows Media Foundation.
-// Принимает сырые BGRA кадры, выдаёт H.264 NAL units.
+// Высокоскоростное сжатие кадров (WIC JPEG) для передачи по сети.
 // =============================================================================
 
 #include "common/VideoTypes.h"
 
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#include <mftransform.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 
 namespace cm {
@@ -27,32 +23,25 @@ public:
     VideoEncoder(const VideoEncoder&) = delete;
     VideoEncoder& operator=(const VideoEncoder&) = delete;
 
-    /// Инициализация Media Foundation и H.264 кодека
+    /// Инициализация кодировщика
     bool initialize(const video::EncoderConfig& config);
 
-    /// Закодировать один сырой кадр
-    /// @param rawFrame — входной кадр (BGRA пиксели)
-    /// @param outEncoded — выходной закодированный кадр (H.264)
-    /// @return true если кадр успешно закодирован
+    /// Закодировать один сырой кадр (BGRA) в JPEG
     bool encodeFrame(const video::RawFrame& rawFrame, video::EncodedFrame& outEncoded);
 
-    /// Обновить параметры кодирования (качество, FPS)
+    /// Обновить параметры кодирования
     bool updateConfig(const video::EncoderConfig& config);
 
     /// Освободить ресурсы
     void shutdown();
 
 private:
-    bool createEncoder();
-    bool configureEncoder();
-
-    ComPtr<IMFTransform>    m_encoder;
-    ComPtr<IMFMediaType>    m_inputType;
-    ComPtr<IMFMediaType>    m_outputType;
-
-    video::EncoderConfig    m_config;
-    uint32_t                m_frameCount = 0;
-    bool                    m_initialized = false;
+    ComPtr<IWICImagingFactory> m_wicFactory;
+    video::EncoderConfig       m_config;
+    uint32_t                   m_frameCount = 0;
+    bool                       m_initialized = false;
+    float                      m_compressionQuality = 0.65f;
+    bool                       m_comInitialized = false;
 };
 
 } // namespace client

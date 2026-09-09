@@ -53,7 +53,7 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
     VideoEncoder encoder;
 
     if (!capturer.initialize()) {
-        std::cerr << "[Agent] Screen capture init failed (DXGI)" << std::endl;
+        std::cerr << "[Agent] Ошибка инициализации захвата экрана (DXGI)" << std::endl;
         return;
     }
 
@@ -64,13 +64,13 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
     encConfig.bitrate = video::DEFAULT_BITRATE;
 
     if (!encoder.initialize(encConfig)) {
-        std::cerr << "[Agent] Video encoder init failed (H.264)" << std::endl;
+        std::cerr << "[Agent] Ошибка инициализации видео-компрессии (WIC)" << std::endl;
         return;
     }
 
-    std::cout << "[Agent] Video streaming started: "
+    std::cout << "[Agent] Стриминг экрана запущен: "
               << encConfig.width << "x" << encConfig.height
-              << " @ " << encConfig.fps << " fps" << std::endl;
+              << " @ " << encConfig.fps << " FPS" << std::endl;
 
     auto frameInterval = std::chrono::milliseconds(1000 / config.targetFps);
 
@@ -83,29 +83,31 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
             // Кодируем
             video::EncodedFrame encoded;
             if (encoder.encodeFrame(rawFrame, encoded)) {
-                // Формируем пакет
-                VideoFrameHeader frameHeader;
-                frameHeader.clientId  = g_clientId.load();
-                frameHeader.timestamp = encoded.timestamp;
-                frameHeader.width     = static_cast<uint16_t>(encoded.width);
-                frameHeader.height    = static_cast<uint16_t>(encoded.height);
-                frameHeader.frameType = static_cast<uint8_t>(encoded.type);
-                frameHeader.quality   = config.quality;
+                if (encoded.data.size() < net::MAX_FRAME_SIZE) {
+                    // Формируем пакет
+                    VideoFrameHeader frameHeader;
+                    frameHeader.clientId  = g_clientId.load();
+                    frameHeader.timestamp = encoded.timestamp;
+                    frameHeader.width     = static_cast<uint16_t>(encoded.width);
+                    frameHeader.height    = static_cast<uint16_t>(encoded.height);
+                    frameHeader.frameType = static_cast<uint8_t>(encoded.type);
+                    frameHeader.quality   = config.quality;
 
-                auto packet = makeVideoPacket(
-                    frameHeader,
-                    encoded.data.data(),
-                    encoded.data.size(),
-                    g_sequence.fetch_add(1)
-                );
+                    auto packet = makeVideoPacket(
+                        frameHeader,
+                        encoded.data.data(),
+                        encoded.data.size(),
+                        g_sequence.fetch_add(1)
+                    );
 
-                // Отправляем по UDP
-                sendto(udpSocket,
-                       reinterpret_cast<const char*>(packet.data()),
-                       static_cast<int>(packet.size()),
-                       0,
-                       reinterpret_cast<const sockaddr*>(&serverAddr),
-                       sizeof(serverAddr));
+                    // Отправляем по UDP
+                    sendto(udpSocket,
+                           reinterpret_cast<const char*>(packet.data()),
+                           static_cast<int>(packet.size()),
+                           0,
+                           reinterpret_cast<const sockaddr*>(&serverAddr),
+                           sizeof(serverAddr));
+                }
             }
         }
 
@@ -419,7 +421,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
         std::cout << "[Agent] Стриминг и мониторинг активны. Окно должно оставаться открытым." << std::endl;
 
-        // Ждём завершения работы потоков
+        // Ждём пока работает агент
+        while (g_running.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        // Завершаем рабочие потоки
         if (videoThread.joinable()) videoThread.join();
         if (cmdThread.joinable()) cmdThread.join();
         if (hbThread.joinable()) hbThread.join();
