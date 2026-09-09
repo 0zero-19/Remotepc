@@ -10,6 +10,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QUdpSocket>
+#include <QNetworkInterface>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QVBoxLayout>
@@ -31,10 +32,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_heartbeatTimer, &QTimer::timeout, this, &MainWindow::onHeartbeatCheck);
     m_heartbeatTimer->start(net::HEARTBEAT_INTERVAL_MS);
 
-    setWindowTitle("ClassroomMonitor — Панель преподавателя");
+    setWindowTitle(QString("ClassroomMonitor — Панель преподавателя [%1]").arg(m_localIps));
     resize(1280, 800);
 
-    statusBar()->showMessage("Ожидание подключений...");
+    statusBar()->showMessage(
+        QString("IP для подключения студентов: %1 | Порт TCP: %2, UDP: %3 | Ожидание...")
+            .arg(m_localIps).arg(net::COMMAND_PORT).arg(net::VIDEO_PORT));
 }
 
 MainWindow::~MainWindow() {
@@ -75,6 +78,15 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::setupNetwork() {
+    // Определяем локальные IPv4 адреса компьютера преподавателя
+    QStringList ipList;
+    for (const auto& address : QNetworkInterface::allAddresses()) {
+        if (address.protocol() == QAbstractSocket::IPv4Protocol && !address.isLoopback()) {
+            ipList.append(address.toString());
+        }
+    }
+    m_localIps = ipList.isEmpty() ? "127.0.0.1" : ipList.join(", ");
+
     // TCP сервер для управляющих команд
     m_tcpServer = new QTcpServer(this);
     connect(m_tcpServer, &QTcpServer::newConnection,
@@ -100,7 +112,8 @@ void MainWindow::setupNetwork() {
     connect(m_udpSocket, &QUdpSocket::readyRead,
             this, &MainWindow::onVideoDataReady);
 
-    qDebug() << "[Server] Listening on TCP:" << net::COMMAND_PORT
+    qDebug() << "[Server] Local IPs:" << m_localIps
+             << "Listening on TCP:" << net::COMMAND_PORT
              << " UDP:" << net::VIDEO_PORT;
 }
 
@@ -122,12 +135,28 @@ void MainWindow::onNewConnection() {
                 this, &MainWindow::onStudentTileClicked);
         m_tiles.insert(clientId, tile);
 
+        // При получении HANDSHAKE обновляем имя в карточке студента
+        connect(session, &ClientSession::handshakeReceived, this, [this, session, tile](uint32_t) {
+            QString displayName = session->hostname();
+            if (!session->username().isEmpty()) {
+                displayName += QString(" (%1)").arg(session->username());
+            }
+            tile->setStudentName(displayName);
+            tile->setOnline(true);
+            statusBar()->showMessage(
+                QString("Подключен: %1 (всего: %2) | IP преподавателя: %3")
+                    .arg(displayName)
+                    .arg(m_sessions.size())
+                    .arg(m_localIps));
+        });
+
         updateGrid();
 
         statusBar()->showMessage(
-            QString("Подключен: %1 (всего: %2)")
-                .arg(session->hostname())
-                .arg(m_sessions.size()));
+            QString("Подключение от %1... (всего: %2) | IP преподавателя: %3")
+                .arg(socket->peerAddress().toString())
+                .arg(m_sessions.size())
+                .arg(m_localIps));
 
         qDebug() << "[Server] New client:" << clientId
                  << "from" << socket->peerAddress().toString();

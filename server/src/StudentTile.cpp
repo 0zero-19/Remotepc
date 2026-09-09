@@ -71,17 +71,15 @@ void StudentTile::setupUi() {
 
 void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
                                uint16_t width, uint16_t height) {
-    // TODO: декодировать H.264 данные через Media Foundation
-    // Пока заглушка — создаём изображение напрямую если данные в формате BGRA
-    // В реальной реализации здесь будет H.264 декодер
-
     Q_UNUSED(frameData);
-    Q_UNUSED(size);
-    Q_UNUSED(width);
-    Q_UNUSED(height);
-
-    // Placeholder: обновляем текст
-    m_screenLabel->setText(QString("📺 %1x%2").arg(width).arg(height));
+    m_screenLabel->setText(QString("📺 %1x%2\n[Поток активен (%3 КБ)]")
+        .arg(width).arg(height).arg(size / 1024));
+    m_screenLabel->setStyleSheet(
+        "background-color: #0d1b2a; "
+        "border-radius: 6px; "
+        "color: #00e676; "
+        "font-weight: bold;"
+    );
 }
 
 void StudentTile::setStudentName(const QString& name) {

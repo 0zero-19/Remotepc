@@ -72,6 +72,7 @@ private:
 
     // Счётчик для назначения clientId
     uint32_t m_nextClientId = 1;
+    QString  m_localIps;
 };
 
 } // namespace server

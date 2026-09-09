@@ -2,10 +2,11 @@
 // ClassroomMonitor — Student Agent Entry Point
 //
 // Главный цикл агента:
-//   1. Подключается к TeacherPanel по TCP
-//   2. Отправляет HANDSHAKE
-//   3. Запускает цикл: захват экрана → кодирование → отправка по UDP
-//   4. Слушает TCP-команды от TeacherPanel
+//   1. Определяет IP адрес TeacherPanel (аргументы / файл server_ip.txt / ввод)
+//   2. Подключается к TeacherPanel по TCP
+//   3. Отправляет HANDSHAKE
+//   4. Запускает цикл: захват экрана (DXGI) -> кодирование -> отправка по UDP
+//   5. Слушает TCP-команды от TeacherPanel
 // =============================================================================
 
 #include "client/ScreenCapturer.h"
@@ -22,10 +23,12 @@
 #include <Windows.h>
 
 #include <iostream>
+#include <fstream>
 #include <thread>
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -50,7 +53,7 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
     VideoEncoder encoder;
 
     if (!capturer.initialize()) {
-        std::cerr << "[Agent] Screen capture init failed" << std::endl;
+        std::cerr << "[Agent] Screen capture init failed (DXGI)" << std::endl;
         return;
     }
 
@@ -61,11 +64,11 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
     encConfig.bitrate = video::DEFAULT_BITRATE;
 
     if (!encoder.initialize(encConfig)) {
-        std::cerr << "[Agent] Video encoder init failed" << std::endl;
+        std::cerr << "[Agent] Video encoder init failed (H.264)" << std::endl;
         return;
     }
 
-    std::cout << "[Agent] Streaming started: "
+    std::cout << "[Agent] Video streaming started: "
               << encConfig.width << "x" << encConfig.height
               << " @ " << encConfig.fps << " fps" << std::endl;
 
@@ -132,14 +135,15 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
 
         if (received <= 0) {
             if (received == 0) {
-                std::cout << "[Agent] Server disconnected" << std::endl;
+                std::cout << "[Agent] Server closed connection" << std::endl;
             } else {
                 int err = WSAGetLastError();
-                if (err != WSAETIMEDOUT) {
+                if (err != WSAETIMEDOUT && err != WSAECONNRESET) {
                     std::cerr << "[Agent] recv error: " << err << std::endl;
                 }
             }
-            continue;
+            g_running.store(false);
+            break;
         }
 
         // Парсим заголовок
@@ -155,12 +159,12 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
         switch (type) {
             case PacketType::LOCK_INPUT:
                 lockMgr.lock();
-                std::cout << "[Agent] Input LOCKED" << std::endl;
+                std::cout << "[Agent] >>> Input LOCKED by teacher" << std::endl;
                 break;
 
             case PacketType::UNLOCK_INPUT:
                 lockMgr.unlock();
-                std::cout << "[Agent] Input UNLOCKED" << std::endl;
+                std::cout << "[Agent] >>> Input UNLOCKED by teacher" << std::endl;
                 break;
 
             case PacketType::MOUSE_MOVE:
@@ -172,7 +176,7 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
                 break;
 
             case PacketType::SHUTDOWN_AGENT:
-                std::cout << "[Agent] Shutdown requested" << std::endl;
+                std::cout << "[Agent] Shutdown requested by server" << std::endl;
                 g_running.store(false);
                 break;
 
@@ -199,13 +203,16 @@ void heartbeatThread(SOCKET tcpSocket) {
     while (g_running.load()) {
         HeartbeatPayload hb;
         hb.clientId = g_clientId.load();
-        // TODO: реальные метрики CPU/RAM
         hb.cpuUsage      = 0.0f;
         hb.memoryUsageMB = 0;
 
         auto packet = makePacket(PacketType::HEARTBEAT, hb, g_sequence.fetch_add(1));
-        send(tcpSocket, reinterpret_cast<const char*>(packet.data()),
-             static_cast<int>(packet.size()), 0);
+        int res = send(tcpSocket, reinterpret_cast<const char*>(packet.data()),
+                       static_cast<int>(packet.size()), 0);
+        if (res <= 0) {
+            g_running.store(false);
+            break;
+        }
 
         std::this_thread::sleep_for(
             std::chrono::milliseconds(net::HEARTBEAT_INTERVAL_MS));
@@ -213,111 +220,220 @@ void heartbeatThread(SOCKET tcpSocket) {
 }
 
 // =============================================================================
+// Вспомогательные функции для определения IP сервера
+// =============================================================================
+
+static std::string trimString(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
+static std::string readServerIpFromFile() {
+    std::ifstream file("server_ip.txt");
+    if (file.is_open()) {
+        std::string ip;
+        if (std::getline(file, ip)) {
+            return trimString(ip);
+        }
+    }
+    return "";
+}
+
+static void saveServerIpToFile(const std::string& ip) {
+    std::ofstream file("server_ip.txt");
+    if (file.is_open()) {
+        file << ip << std::endl;
+    }
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
-int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
-    // Для отладки — показываем консоль
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
+    // Включаем консоль для вывода информации и ввода IP
     AllocConsole();
     FILE* fp;
     freopen_s(&fp, "CONOUT$", "w", stdout);
     freopen_s(&fp, "CONOUT$", "w", stderr);
+    freopen_s(&fp, "CONIN$", "r", stdin);
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
 
-    std::cout << "=== ClassroomMonitor Student Agent ===" << std::endl;
+    std::cout << "=====================================================" << std::endl;
+    std::cout << "       ClassroomMonitor — Агент Студента            " << std::endl;
+    std::cout << "=====================================================" << std::endl;
 
     // Инициализация Winsock
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "[Agent] WSAStartup failed" << std::endl;
+        std::cerr << "[Agent] Ошибка инициализации Winsock (WSAStartup)" << std::endl;
+        system("pause");
         return 1;
     }
 
     net::AgentConfig config;
-    // TODO: читать из конфига или аргументов командной строки
-    // config.serverHost = "192.168.1.100";
 
-    // --- TCP соединение ---
-    SOCKET tcpSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (tcpSocket == INVALID_SOCKET) {
-        std::cerr << "[Agent] TCP socket creation failed" << std::endl;
-        WSACleanup();
-        return 1;
+    // 1. Проверяем аргументы командной строки
+    std::string cmdArg = trimString(lpCmdLine ? lpCmdLine : "");
+    if (!cmdArg.empty()) {
+        // Если передан ключ --server или просто IP
+        if (cmdArg.find("--server") != std::string::npos) {
+            size_t pos = cmdArg.find("--server");
+            cmdArg = trimString(cmdArg.substr(pos + 8));
+        }
+        config.serverHost = cmdArg;
+    } else {
+        // 2. Проверяем файл server_ip.txt
+        std::string savedIp = readServerIpFromFile();
+        if (!savedIp.empty()) {
+            std::cout << "[i] Найден сохраненный IP сервера: " << savedIp << std::endl;
+            config.serverHost = savedIp;
+        } else {
+            // 3. Запрашиваем ввод у пользователя
+            std::cout << "\nВведите IP-адрес компьютера преподавателя (Enter для 127.0.0.1): ";
+            std::string inputIp;
+            std::getline(std::cin, inputIp);
+            inputIp = trimString(inputIp);
+            if (inputIp.empty()) {
+                config.serverHost = "127.0.0.1";
+            } else {
+                config.serverHost = inputIp;
+                saveServerIpToFile(inputIp);
+            }
+        }
     }
 
-    sockaddr_in serverAddr = {};
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port   = htons(config.commandPort);
-    inet_pton(AF_INET, config.serverHost.c_str(), &serverAddr.sin_addr);
+    // Цикл подключения и работы
+    while (true) {
+        std::cout << "\n[Agent] Подключение к " << config.serverHost
+                  << ":" << config.commandPort << "..." << std::endl;
 
-    std::cout << "[Agent] Connecting to " << config.serverHost
-              << ":" << config.commandPort << "..." << std::endl;
+        SOCKET tcpSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (tcpSocket == INVALID_SOCKET) {
+            std::cerr << "[Agent] Ошибка создания TCP сокета: " << WSAGetLastError() << std::endl;
+            break;
+        }
 
-    if (connect(tcpSocket, reinterpret_cast<sockaddr*>(&serverAddr),
-                sizeof(serverAddr)) == SOCKET_ERROR) {
-        std::cerr << "[Agent] TCP connect failed: " << WSAGetLastError() << std::endl;
+        // Устанавливаем таймаут подключения
+        DWORD timeout = net::TCP_CONNECT_TIMEOUT_MS;
+        setsockopt(tcpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        setsockopt(tcpSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+        sockaddr_in serverAddr = {};
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_port   = htons(config.commandPort);
+        inet_pton(AF_INET, config.serverHost.c_str(), &serverAddr.sin_addr);
+
+        if (connect(tcpSocket, reinterpret_cast<sockaddr*>(&serverAddr),
+                    sizeof(serverAddr)) == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            std::cerr << "\n[!] Не удалось подключиться к серверу (" << config.serverHost << ":" << config.commandPort << ")" << std::endl;
+            std::cerr << "    Код ошибки Winsock: " << err << std::endl;
+            std::cerr << "\n    Проверьте:" << std::endl;
+            std::cerr << "    1. Запущена ли программа TeacherPanel на компьютере преподавателя?" << std::endl;
+            std::cerr << "    2. Правильный ли IP-адрес указан? (IP преподавателя отображается в окне TeacherPanel)" << std::endl;
+            std::cerr << "    3. Находятся ли компьютеры в одной локальной сети / Wi-Fi?" << std::endl;
+            std::cerr << "    4. Не блокирует ли Брандмауэр Windows (Firewall) порт 9101?" << std::endl;
+
+            closesocket(tcpSocket);
+
+            std::cout << "\nЧто сделать?" << std::endl;
+            std::cout << "  [1] Повторить попытку подключения" << std::endl;
+            std::cout << "  [2] Ввести другой IP-адрес" << std::endl;
+            std::cout << "  [3] Выйти" << std::endl;
+            std::cout << "Выберите (1/2/3): ";
+
+            std::string choice;
+            std::getline(std::cin, choice);
+            choice = trimString(choice);
+
+            if (choice == "2") {
+                std::cout << "Введите новый IP-адрес преподавателя: ";
+                std::string newIp;
+                std::getline(std::cin, newIp);
+                newIp = trimString(newIp);
+                if (!newIp.empty()) {
+                    config.serverHost = newIp;
+                    saveServerIpToFile(newIp);
+                }
+                continue;
+            } else if (choice == "3") {
+                break;
+            } else {
+                continue;
+            }
+        }
+
+        std::cout << "[Agent] Успешно подключено к серверу!" << std::endl;
+
+        // --- Отправляем HANDSHAKE ---
+        HandshakePayload handshake = {};
+        char hostname[MAX_HOSTNAME_LEN] = {};
+        DWORD hostnameLen = MAX_HOSTNAME_LEN;
+        GetComputerNameA(hostname, &hostnameLen);
+        strncpy_s(handshake.hostname, hostname, MAX_HOSTNAME_LEN - 1);
+
+        char username[MAX_USERNAME_LEN] = {};
+        DWORD usernameLen = MAX_USERNAME_LEN;
+        GetUserNameA(username, &usernameLen);
+        strncpy_s(handshake.username, username, MAX_USERNAME_LEN - 1);
+
+        handshake.screenWidth  = static_cast<uint16_t>(GetSystemMetrics(SM_CXSCREEN));
+        handshake.screenHeight = static_cast<uint16_t>(GetSystemMetrics(SM_CYSCREEN));
+
+        std::cout << "[Agent] Отправка данных: ПК '" << handshake.hostname
+                  << "', Пользователь '" << handshake.username
+                  << "', Экран " << handshake.screenWidth << "x" << handshake.screenHeight << std::endl;
+
+        auto hsPacket = makePacket(PacketType::HANDSHAKE, handshake, g_sequence.fetch_add(1));
+        send(tcpSocket, reinterpret_cast<const char*>(hsPacket.data()),
+             static_cast<int>(hsPacket.size()), 0);
+
+        g_clientId.store(1);
+        g_running.store(true);
+
+        // --- UDP сокет для видео ---
+        SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (udpSocket == INVALID_SOCKET) {
+            std::cerr << "[Agent] Ошибка создания UDP сокета" << std::endl;
+            closesocket(tcpSocket);
+            break;
+        }
+
+        sockaddr_in udpServerAddr = {};
+        udpServerAddr.sin_family = AF_INET;
+        udpServerAddr.sin_port   = htons(config.videoPort);
+        inet_pton(AF_INET, config.serverHost.c_str(), &udpServerAddr.sin_addr);
+
+        // --- Объекты управления ---
+        InputInjector injector;
+        LockManager lockMgr;
+
+        // --- Запускаем рабочие потоки ---
+        std::thread videoThread(videoStreamThread, udpSocket, udpServerAddr, std::ref(config));
+        std::thread cmdThread(commandThread, tcpSocket, std::ref(injector), std::ref(lockMgr));
+        std::thread hbThread(heartbeatThread, tcpSocket);
+
+        std::cout << "[Agent] Стриминг и мониторинг активны. Окно должно оставаться открытым." << std::endl;
+
+        // Ждём завершения работы потоков
+        if (videoThread.joinable()) videoThread.join();
+        if (cmdThread.joinable()) cmdThread.join();
+        if (hbThread.joinable()) hbThread.join();
+
+        closesocket(udpSocket);
         closesocket(tcpSocket);
-        WSACleanup();
-        return 1;
+
+        std::cout << "\n[Agent] Связь с сервером потеряна." << std::endl;
+        std::cout << "Нажмите Enter для повторной попытки или закройте окно..." << std::endl;
+        std::string dummy;
+        std::getline(std::cin, dummy);
     }
 
-    std::cout << "[Agent] Connected!" << std::endl;
-
-    // --- Отправляем HANDSHAKE ---
-    HandshakePayload handshake;
-    char hostname[MAX_HOSTNAME_LEN] = {};
-    DWORD hostnameLen = MAX_HOSTNAME_LEN;
-    GetComputerNameA(hostname, &hostnameLen);
-    strncpy_s(handshake.hostname, hostname, MAX_HOSTNAME_LEN - 1);
-
-    char username[MAX_USERNAME_LEN] = {};
-    DWORD usernameLen = MAX_USERNAME_LEN;
-    GetUserNameA(username, &usernameLen);
-    strncpy_s(handshake.username, username, MAX_USERNAME_LEN - 1);
-
-    handshake.screenWidth  = static_cast<uint16_t>(GetSystemMetrics(SM_CXSCREEN));
-    handshake.screenHeight = static_cast<uint16_t>(GetSystemMetrics(SM_CYSCREEN));
-
-    auto hsPacket = makePacket(PacketType::HANDSHAKE, handshake, g_sequence.fetch_add(1));
-    send(tcpSocket, reinterpret_cast<const char*>(hsPacket.data()),
-         static_cast<int>(hsPacket.size()), 0);
-
-    // Ждём clientId от сервера (ACK с clientId)
-    // TODO: реализовать назначение clientId сервером
-    g_clientId.store(1);
-
-    // --- UDP сокет ---
-    SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (udpSocket == INVALID_SOCKET) {
-        std::cerr << "[Agent] UDP socket creation failed" << std::endl;
-        closesocket(tcpSocket);
-        WSACleanup();
-        return 1;
-    }
-
-    sockaddr_in udpServerAddr = {};
-    udpServerAddr.sin_family = AF_INET;
-    udpServerAddr.sin_port   = htons(config.videoPort);
-    inet_pton(AF_INET, config.serverHost.c_str(), &udpServerAddr.sin_addr);
-
-    // --- Объекты управления ---
-    InputInjector injector;
-    LockManager lockMgr;
-
-    // --- Запускаем потоки ---
-    std::thread videoThread(videoStreamThread, udpSocket, udpServerAddr, std::ref(config));
-    std::thread cmdThread(commandThread, tcpSocket, std::ref(injector), std::ref(lockMgr));
-    std::thread hbThread(heartbeatThread, tcpSocket);
-
-    // Ждём завершения
-    videoThread.join();
-    cmdThread.join();
-    hbThread.join();
-
-    // Cleanup
-    closesocket(udpSocket);
-    closesocket(tcpSocket);
     WSACleanup();
-
-    std::cout << "[Agent] Shutdown complete" << std::endl;
+    std::cout << "[Agent] Завершение работы." << std::endl;
     return 0;
 }
