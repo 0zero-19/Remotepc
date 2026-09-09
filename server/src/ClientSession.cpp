@@ -93,6 +93,19 @@ void ClientSession::processPacket(const QByteArray& data) {
             break;
         }
 
+        case PacketType::VIDEO_FRAME: {
+            if (data.size() >= static_cast<int>(sizeof(PacketHeader) + sizeof(VideoFrameHeader))) {
+                VideoFrameHeader frameHeader;
+                std::memcpy(&frameHeader,
+                            data.constData() + sizeof(PacketHeader),
+                            sizeof(VideoFrameHeader));
+
+                QByteArray frameData = data.mid(sizeof(PacketHeader) + sizeof(VideoFrameHeader));
+                emit videoFrameReceived(m_clientId, frameData, frameHeader.width, frameHeader.height);
+            }
+            break;
+        }
+
         default:
             qDebug() << "[Session]" << m_clientId
                      << "Unknown packet type:" << header.type;

@@ -150,6 +150,12 @@ void MainWindow::onNewConnection() {
                     .arg(m_localIps));
         });
 
+        // При получении видеокадров по TCP обновляем тайл
+        connect(session, &ClientSession::videoFrameReceived, this, [tile](uint32_t, const QByteArray& frameData, uint16_t w, uint16_t h) {
+            tile->updateFrame(reinterpret_cast<const uint8_t*>(frameData.constData()),
+                              frameData.size(), w, h);
+        });
+
         updateGrid();
 
         statusBar()->showMessage(

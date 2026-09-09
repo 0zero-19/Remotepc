@@ -57,6 +57,7 @@ signals:
     void disconnected(uint32_t clientId);
     void handshakeReceived(uint32_t clientId);
     void heartbeatReceived(uint32_t clientId);
+    void videoFrameReceived(uint32_t clientId, const QByteArray& frameData, uint16_t width, uint16_t height);
 
 private slots:
     void onDataReady();
