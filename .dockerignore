@@ -1,0 +1,10 @@
+.git
+build/
+build-output/
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+.vs/
+.vscode/

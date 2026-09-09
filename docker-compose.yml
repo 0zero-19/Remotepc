@@ -1,0 +1,37 @@
+# =============================================================================
+# ClassroomMonitor — Docker Compose
+#
+# Команды:
+#   docker-compose build          — собрать образ (первый раз, ~20 мин)
+#   docker-compose run builder    — запустить сборку проекта
+#   docker-compose run dev        — открыть shell для разработки
+#
+# ВАЖНО: Требует Docker Desktop в режиме Windows Containers!
+# =============================================================================
+
+services:
+  # Полная сборка проекта
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./build-output:/output
+    command: >
+      powershell -Command "
+        Copy-Item C:\\output\\*.exe \\output\\ -ErrorAction SilentlyContinue;
+        Write-Host 'Binaries copied to ./build-output/'
+      "
+
+  # Интерактивная среда разработки
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: buildtools
+    volumes:
+      - .:/project
+    working_dir: /project
+    command: powershell -NoExit
+    stdin_open: true
+    tty: true

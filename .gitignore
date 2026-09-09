@@ -1,0 +1,67 @@
+# ============================================
+# ClassroomMonitor .gitignore
+# C++ / CMake / Qt6 / Docker
+# ============================================
+
+# --- Build directories ---
+build/
+out/
+cmake-build-*/
+Release/
+Debug/
+x64/
+x86/
+
+# --- CMake generated ---
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!CMakePresets.json
+!cmake/*.cmake
+
+# --- Compiled binaries ---
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+*.a
+*.pdb
+*.ilk
+*.exp
+*.idb
+
+# --- Qt generated ---
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.qm
+.qmake.stash
+
+# --- IDE ---
+.vs/
+.vscode/settings.json
+.idea/
+*.user
+*.suo
+*.sln.docstates
+*.ncb
+*.sdf
+*.opensdf
+
+# --- OS ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
+
+# --- Docker ---
+.docker/
+
+# --- Dependencies (if vendored) ---
+external/
+vcpkg_installed/
