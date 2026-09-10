@@ -1,13 +1,12 @@
 // =============================================================================
-// ClassroomMonitor — Student Tile Implementation
+// ClassroomMonitor — Student Tile Implementation (Minimalist Grid Item)
 // =============================================================================
 
 #include "server/StudentTile.h"
+#include "server/ThemeManager.h"
 
 #include <QVBoxLayout>
 #include <QMouseEvent>
-#include <QPainter>
-#include <QStyleOption>
 
 namespace cm {
 namespace server {
@@ -15,58 +14,42 @@ namespace server {
 StudentTile::StudentTile(uint32_t clientId, QWidget* parent)
     : QWidget(parent)
     , m_clientId(clientId)
+    , m_studentName(QString("PC-%1").arg(clientId, 2, 10, QChar('0')))
 {
     setupUi();
-    setFixedSize(320, 220);
     setCursor(Qt::PointingHandCursor);
 }
 
-StudentTile::~StudentTile() = default;
-
 void StudentTile::setupUi() {
     auto* layout = new QVBoxLayout(this);
-    layout->setSpacing(4);
-    layout->setContentsMargins(4, 4, 4, 4);
+    layout->setContentsMargins(0, 0, 0, 0);
 
-    // Превью экрана
     m_screenLabel = new QLabel(this);
-    m_screenLabel->setMinimumSize(312, 175);
     m_screenLabel->setAlignment(Qt::AlignCenter);
-    m_screenLabel->setStyleSheet(
-        "background-color: #1a1a2e; "
-        "border-radius: 6px; "
-        "color: #666;"
+    m_screenLabel->setStyleSheet("background-color: #292725; color: #a89984; font-size: 11px;");
+    m_screenLabel->setText(QString("Экран %1").arg(m_studentName));
+    layout->addWidget(m_screenLabel);
+
+    // Плавающий бейдж имени в левом нижнем углу
+    m_nameLabel = new QLabel(m_studentName, this);
+    m_nameLabel->setStyleSheet(
+        "background-color: rgba(40, 40, 40, 0.9);"
+        "border: 1px solid #504945;"
+        "border-radius: 4px;"
+        "padding: 4px 7px;"
+        "font-size: 11px;"
+        "color: #ebdbb2;"
     );
-    m_screenLabel->setText("Ожидание...");
-    layout->addWidget(m_screenLabel, 1);
+    m_nameLabel->move(7, height() - 30);
 
-    // Нижняя панель: имя + статус
-    auto* bottomLayout = new QHBoxLayout();
+    setSelected(false);
+}
 
-    m_nameLabel = new QLabel(QString("Студент #%1").arg(m_clientId), this);
-    m_nameLabel->setStyleSheet("font-weight: bold; color: #e0e0e0; font-size: 12px;");
-    bottomLayout->addWidget(m_nameLabel);
-
-    bottomLayout->addStretch();
-
-    m_statusLabel = new QLabel("●", this);
-    m_statusLabel->setStyleSheet("color: #4caf50; font-size: 16px;"); // Зелёный = online
-    bottomLayout->addWidget(m_statusLabel);
-
-    layout->addLayout(bottomLayout);
-
-    // Стиль карточки
-    setStyleSheet(
-        "StudentTile {"
-        "  background-color: #16213e;"
-        "  border: 1px solid #0f3460;"
-        "  border-radius: 8px;"
-        "}"
-        "StudentTile:hover {"
-        "  border-color: #e94560;"
-        "  background-color: #1a1a3e;"
-        "}"
-    );
+void StudentTile::resizeEvent(QResizeEvent* /*event*/) {
+    if (m_nameLabel) {
+        m_nameLabel->adjustSize();
+        m_nameLabel->move(7, height() - m_nameLabel->height() - 7);
+    }
 }
 
 void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
@@ -76,36 +59,40 @@ void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
     QImage img;
     if (img.loadFromData(frameData, static_cast<int>(size), "JPEG") ||
         img.loadFromData(frameData, static_cast<int>(size))) {
-        QPixmap pixmap = QPixmap::fromImage(img).scaled(
+        m_currentFrame = QPixmap::fromImage(img);
+        QPixmap pixmap = m_currentFrame.scaled(
             m_screenLabel->size(),
             Qt::KeepAspectRatio,
             Qt::SmoothTransformation
         );
         m_screenLabel->setPixmap(pixmap);
-        m_screenLabel->setStyleSheet(
-            "background-color: #000000; "
-            "border-radius: 6px;"
-        );
+        m_screenLabel->setText("");
     } else {
-        // Запасной вывод текстовой информации если формат не распознан
-        m_screenLabel->setText(QString("📺 %1x%2\n[Поток: %3 КБ]")
-            .arg(width).arg(height).arg(size / 1024));
+        m_screenLabel->setText(QString("📺 %1x%2").arg(width).arg(height));
     }
 }
 
 void StudentTile::setStudentName(const QString& name) {
+    m_studentName = name;
     m_nameLabel->setText(name);
+    m_nameLabel->adjustSize();
+    m_nameLabel->move(7, height() - m_nameLabel->height() - 7);
 }
 
 void StudentTile::setOnline(bool online) {
     m_online = online;
-    if (online) {
-        m_statusLabel->setStyleSheet("color: #4caf50; font-size: 16px;"); // Зелёный
-        m_statusLabel->setToolTip("Online");
-    } else {
-        m_statusLabel->setStyleSheet("color: #f44336; font-size: 16px;"); // Красный
-        m_statusLabel->setToolTip("Offline");
-    }
+}
+
+void StudentTile::setSelected(bool selected) {
+    const auto& theme = ThemeManager::instance().currentTheme();
+    QString borderCol = selected ? theme.yellow : theme.border;
+    setStyleSheet(QString(
+        "StudentTile {"
+        "  background-color: %1;"
+        "  border: 1px solid %2;"
+        "  border-radius: 5px;"
+        "}"
+    ).arg(theme.surface).arg(borderCol));
 }
 
 void StudentTile::mousePressEvent(QMouseEvent* event) {
@@ -115,13 +102,11 @@ void StudentTile::mousePressEvent(QMouseEvent* event) {
     QWidget::mousePressEvent(event);
 }
 
-void StudentTile::paintEvent(QPaintEvent* event) {
-    // Позволяем стилизацию через stylesheets для QWidget
-    QStyleOption opt;
-    opt.initFrom(this);
-    QPainter p(this);
-    style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
-    QWidget::paintEvent(event);
+void StudentTile::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        emit doubleClicked(m_clientId);
+    }
+    QWidget::mouseDoubleClickEvent(event);
 }
 
 } // namespace server

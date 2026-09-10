@@ -28,6 +28,7 @@ public:
     QString  username() const { return m_username; }
     uint16_t screenWidth() const { return m_screenWidth; }
     uint16_t screenHeight() const { return m_screenHeight; }
+    QHostAddress peerAddress() const { return m_socket ? m_socket->peerAddress() : QHostAddress(); }
 
     std::chrono::steady_clock::time_point lastHeartbeat() const { return m_lastHeartbeat; }
 
