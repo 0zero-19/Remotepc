@@ -60,10 +60,11 @@ struct EncodedFrame {
 struct EncoderConfig {
     uint32_t width    = 1920;
     uint32_t height   = 1080;
-    uint32_t fps      = 15;
+    uint32_t fps      = 30;
     uint32_t bitrate  = DEFAULT_BITRATE;
-    uint32_t iFrameInterval = IFRAME_INTERVAL;
+    uint32_t iFrameInterval = 60; // 2 сек при 30fps
 };
 
 } // namespace video
+
 } // namespace cm
