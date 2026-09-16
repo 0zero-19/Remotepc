@@ -315,6 +315,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
     std::cout << "=====================================================" << std::endl;
     std::cout << "       ClassroomMonitor — Агент Студента            " << std::endl;
+    std::cout << "       Сборка: " << __DATE__ << " " << __TIME__ << std::endl;
     std::cout << "=====================================================" << std::endl;
 
     // Инициализация Winsock

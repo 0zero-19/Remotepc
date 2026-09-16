@@ -31,6 +31,7 @@ bool VideoEncoder::initialize(const video::EncoderConfig& config) {
     if (SUCCEEDED(hr)) {
         m_comInitialized = true;
     }
+    // RPC_E_CHANGED_MODE (0x80010106) — COM уже инициализирован, это нормально
 
     // Создаем WIC Imaging Factory
     hr = CoCreateInstance(
@@ -61,6 +62,9 @@ bool VideoEncoder::initialize(const video::EncoderConfig& config) {
     m_frameCount = 0;
     m_initialized = true;
 
+    std::cout << "[VideoEncoder] Инициализация успешна (WIC JPEG, качество "
+              << static_cast<int>(m_compressionQuality * 100) << "%)" << std::endl;
+
     return true;
 }
 
@@ -68,55 +72,65 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     if (!m_initialized || !m_wicFactory) return false;
     if (rawFrame.pixels.empty() || rawFrame.width == 0 || rawFrame.height == 0) return false;
 
-    // 1. Создаем WIC Bitmap из сырых BGRA пикселей
-    ComPtr<IWICBitmap> pBitmap;
-    HRESULT hr = m_wicFactory->CreateBitmapFromMemory(
-        rawFrame.width,
-        rawFrame.height,
-        GUID_WICPixelFormat32bppBGRA,
-        static_cast<UINT>(rawFrame.stride),
-        static_cast<UINT>(rawFrame.pixels.size()),
-        const_cast<BYTE*>(rawFrame.pixels.data()),
-        pBitmap.GetAddressOf()
-    );
-    if (FAILED(hr)) return false;
+    // --- Шаг 1: Конвертируем BGRA → BGR (убираем альфа-канал вручную) ---
+    // JPEG не поддерживает альфа-канал. Без этого шага WIC неправильно
+    // интерпретирует 4-байтовые пиксели, вызывая вертикальные полосы.
+    const uint32_t bgrStride = rawFrame.width * 3;
+    // Выравниваем stride до 4 байт (требование WIC/GDI)
+    const uint32_t bgrStridePadded = (bgrStride + 3) & ~3u;
+    const size_t bgrSize = static_cast<size_t>(bgrStridePadded) * rawFrame.height;
+    std::vector<uint8_t> bgrPixels(bgrSize, 0);
 
-    // 2. Конвертируем BGRA → 24bppBGR (JPEG не поддерживает альфа-канал!)
-    ComPtr<IWICFormatConverter> pConverter;
-    hr = m_wicFactory->CreateFormatConverter(pConverter.GetAddressOf());
-    if (FAILED(hr)) return false;
+    const uint32_t srcStride = rawFrame.stride;  // width * 4, уже нормализован
 
-    hr = pConverter->Initialize(
-        pBitmap.Get(),
-        GUID_WICPixelFormat24bppBGR,
-        WICBitmapDitherTypeNone,
-        nullptr,
-        0.0,
-        WICBitmapPaletteTypeCustom
-    );
-    if (FAILED(hr)) return false;
+    for (uint32_t y = 0; y < rawFrame.height; ++y) {
+        const uint8_t* src = rawFrame.pixels.data() + y * srcStride;
+        uint8_t* dst = bgrPixels.data() + y * bgrStridePadded;
+        for (uint32_t x = 0; x < rawFrame.width; ++x) {
+            dst[x * 3 + 0] = src[x * 4 + 0]; // B
+            dst[x * 3 + 1] = src[x * 4 + 1]; // G
+            dst[x * 3 + 2] = src[x * 4 + 2]; // R
+            // src[x * 4 + 3] = A — пропускаем
+        }
+    }
 
-    // 3. Создаем поток памяти для JPEG
+    // --- Шаг 2: Создаём поток памяти для JPEG ---
     IStream* pStream = nullptr;
-    hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
-    if (FAILED(hr)) return false;
+    HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] CreateStreamOnHGlobal failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
     ComPtr<IStream> spStream;
     spStream.Attach(pStream);
 
-    // 4. Создаем JPEG энкодер
+    // --- Шаг 3: Создаём JPEG кодировщик ---
     ComPtr<IWICBitmapEncoder> pEncoder;
     hr = m_wicFactory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, pEncoder.GetAddressOf());
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] CreateEncoder(JPEG) failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
     hr = pEncoder->Initialize(spStream.Get(), WICBitmapEncoderNoCache);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] pEncoder->Initialize failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
-    // 5. Создаем кадр с настройками качества
+    // --- Шаг 4: Создаём кадр с настройкой качества ---
     ComPtr<IWICBitmapFrameEncode> pFrameEncode;
     ComPtr<IPropertyBag2> pPropertyBag;
     hr = pEncoder->CreateNewFrame(pFrameEncode.GetAddressOf(), pPropertyBag.GetAddressOf());
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] CreateNewFrame failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
     PROPBAG2 option = { 0 };
     option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
@@ -127,29 +141,63 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     pPropertyBag->Write(1, &option, &varValue);
 
     hr = pFrameEncode->Initialize(pPropertyBag.Get());
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] pFrameEncode->Initialize failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
     hr = pFrameEncode->SetSize(rawFrame.width, rawFrame.height);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] SetSize failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
+    // Устанавливаем 24bpp BGR формат — нативный для JPEG
     WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
     hr = pFrameEncode->SetPixelFormat(&format);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] SetPixelFormat failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
-    // 6. Записываем сконвертированные пиксели из IWICFormatConverter
-    hr = pFrameEncode->WriteSource(pConverter.Get(), nullptr);
-    if (FAILED(hr)) return false;
+    // --- Шаг 5: Записываем BGR пиксели ---
+    hr = pFrameEncode->WritePixels(
+        rawFrame.height,
+        bgrStridePadded,
+        static_cast<UINT>(bgrSize),
+        bgrPixels.data()
+    );
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] WritePixels failed: 0x"
+                  << std::hex << hr << std::dec << " (stride="
+                  << bgrStridePadded << " size=" << bgrSize << ")" << std::endl;
+        return false;
+    }
 
     hr = pFrameEncode->Commit();
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] FrameEncode Commit failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
     hr = pEncoder->Commit();
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        std::cerr << "[VideoEncoder] Encoder Commit failed: 0x"
+                  << std::hex << hr << std::dec << std::endl;
+        return false;
+    }
 
-    // 7. Извлекаем готовые JPEG-байты из потока
+    // --- Шаг 6: Извлекаем JPEG байты ---
     HGLOBAL hGlobal = nullptr;
     hr = GetHGlobalFromStream(spStream.Get(), &hGlobal);
-    if (FAILED(hr) || !hGlobal) return false;
+    if (FAILED(hr) || !hGlobal) {
+        std::cerr << "[VideoEncoder] GetHGlobalFromStream failed" << std::endl;
+        return false;
+    }
 
     STATSTG stat = {};
     SIZE_T streamSize = 0;
@@ -159,7 +207,10 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
         streamSize = GlobalSize(hGlobal);
     }
 
-    if (streamSize == 0) return false;
+    if (streamSize == 0) {
+        std::cerr << "[VideoEncoder] Encoded JPEG size is 0" << std::endl;
+        return false;
+    }
 
     void* pData = GlobalLock(hGlobal);
     if (!pData) return false;
@@ -174,6 +225,13 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     outEncoded.height    = rawFrame.height;
     outEncoded.timestamp = rawFrame.timestamp;
     outEncoded.type      = video::FrameType::I_FRAME;
+
+    // Логируем первый кадр для диагностики
+    if (m_frameCount == 0) {
+        std::cout << "[VideoEncoder] Первый кадр закодирован: " << rawFrame.width << "x" << rawFrame.height
+                  << " BGRA stride=" << rawFrame.stride
+                  << " -> JPEG " << streamSize << " байт" << std::endl;
+    }
 
     m_frameCount++;
     return true;
