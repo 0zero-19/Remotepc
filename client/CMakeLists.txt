@@ -38,7 +38,9 @@ target_link_libraries(StudentAgent
         # Win32
         user32
         gdi32
+        shell32
 )
+
 
 # Определения для Winsock
 target_compile_definitions(StudentAgent PRIVATE

@@ -117,9 +117,10 @@ struct KeyPayload {
 
 struct SetQualityPayload {
     uint8_t  quality  = 50;         // 1—100
-    uint8_t  maxFps   = 15;         // 1—60
+    uint8_t  maxFps   = 30;         // 1—60
     uint16_t reserved = 0;
 };
+
 
 struct VideoFrameHeader {
     uint32_t clientId   = 0;

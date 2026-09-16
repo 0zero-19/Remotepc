@@ -8,9 +8,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-add_executable(TeacherPanel
+add_executable(TeacherPanel WIN32
     src/main.cpp
     src/MainWindow.cpp
+
     src/StudentTile.cpp
     src/ClientSession.cpp
     src/StudentViewDialog.cpp

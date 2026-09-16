@@ -1,7 +1,7 @@
 @echo off
 setlocal
 echo ===================================================
-echo   ClassroomMonitor - Student Agent (Background Mode)
+echo   ClassroomMonitor - Student Agent (Console Debug Mode)
 echo ===================================================
 
 set SERVER_IP=%1
@@ -12,26 +12,22 @@ if "%SERVER_IP%"=="" (
     )
 )
 
-:: Проверяем наличие cmake и обновляем сборку если возможно
 where cmake >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo [1/2] Проверка и сборка последней версии StudentAgent...
     if not exist "build" (
         cmake -S . -B build -G "Visual Studio 17 2022" -A x64
     )
-    cmake --build build --config Debug --target StudentAgent >nul 2>&1
+    cmake --build build --config Debug --target StudentAgent
 )
 
-echo [2/2] Запуск Агента Студента в фоновом режиме...
-echo Логи записываются в log_run.txt
-echo Для открытия консоли используйте run_student_console.bat
-
+echo [2/2] Запуск Агента Студента с живой консолью...
 if exist "build\Debug\StudentAgent.exe" (
-    start "" "build\Debug\StudentAgent.exe" %SERVER_IP%
+    "build\Debug\StudentAgent.exe" --console %SERVER_IP%
     exit /b 0
 )
 if exist "build\Release\StudentAgent.exe" (
-    start "" "build\Release\StudentAgent.exe" %SERVER_IP%
+    "build\Release\StudentAgent.exe" --console %SERVER_IP%
     exit /b 0
 )
 

@@ -34,8 +34,9 @@ constexpr uint32_t TCP_CONNECT_TIMEOUT_MS = 5000;  // Таймаут TCP-сое�
 constexpr size_t   MAX_UDP_PACKET_SIZE  = 65507;   // Максимум для UDP
 constexpr size_t   MAX_FRAME_SIZE       = 60000;   // Макс размер одного UDP-пакета с кадром
 constexpr uint32_t MAX_CLIENTS          = 50;       // Макс студентов
-constexpr uint32_t MAX_FPS              = 30;       // Макс FPS
-constexpr uint32_t DEFAULT_FPS          = 15;       // FPS по умолчанию
+constexpr uint32_t MAX_FPS              = 60;       // Макс FPS
+constexpr uint32_t DEFAULT_FPS          = 30;       // FPS по умолчанию (30 кадров/сек)
+
 
 // =============================================================================
 // Конфигурация по умолчанию
