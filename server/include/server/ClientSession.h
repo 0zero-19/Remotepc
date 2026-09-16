@@ -44,6 +44,10 @@ public:
     void sendMouseClick(float normalizedX, float normalizedY,
                         uint8_t button, uint8_t action);
 
+    /// Отправить скролл мыши
+    void sendMouseScroll(float normalizedX, float normalizedY,
+                         int16_t deltaX, int16_t deltaY);
+
     /// Отправить нажатие клавиши
     void sendKeyPress(uint16_t vkCode, uint16_t scanCode, uint32_t flags);
 

@@ -186,6 +186,16 @@ void ClientSession::sendMouseClick(float normalizedX, float normalizedY,
     sendPacket(makePacket(PacketType::MOUSE_CLICK, payload, m_sequence++));
 }
 
+void ClientSession::sendMouseScroll(float normalizedX, float normalizedY,
+                                     int16_t deltaX, int16_t deltaY) {
+    MouseScrollPayload payload;
+    payload.normalizedX = normalizedX;
+    payload.normalizedY = normalizedY;
+    payload.deltaX = deltaX;
+    payload.deltaY = deltaY;
+    sendPacket(makePacket(PacketType::MOUSE_SCROLL, payload, m_sequence++));
+}
+
 void ClientSession::sendKeyPress(uint16_t vkCode, uint16_t scanCode, uint32_t flags) {
     KeyPayload payload;
     payload.virtualKeyCode = vkCode;

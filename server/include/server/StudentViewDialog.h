@@ -14,6 +14,7 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QWheelEvent>
+#include <QPointF>
 
 #include "server/ClientSession.h"
 
@@ -46,6 +47,7 @@ private slots:
 private:
     void setupUi();
     void sendRemoteMouse(QMouseEvent* event, uint8_t action);
+    QPointF mapToImageNormalized(QPointF localPos);
 
     uint32_t       m_clientId;
     ClientSession* m_session;

@@ -68,15 +68,43 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     if (!m_initialized || !m_wicFactory) return false;
     if (rawFrame.pixels.empty() || rawFrame.width == 0 || rawFrame.height == 0) return false;
 
-    // Создаем поток памяти в IStream
+    // 1. Создаем WIC Bitmap из сырых BGRA пикселей
+    ComPtr<IWICBitmap> pBitmap;
+    HRESULT hr = m_wicFactory->CreateBitmapFromMemory(
+        rawFrame.width,
+        rawFrame.height,
+        GUID_WICPixelFormat32bppBGRA,
+        static_cast<UINT>(rawFrame.stride),
+        static_cast<UINT>(rawFrame.pixels.size()),
+        const_cast<BYTE*>(rawFrame.pixels.data()),
+        pBitmap.GetAddressOf()
+    );
+    if (FAILED(hr)) return false;
+
+    // 2. Конвертируем BGRA → 24bppBGR (JPEG не поддерживает альфа-канал!)
+    ComPtr<IWICFormatConverter> pConverter;
+    hr = m_wicFactory->CreateFormatConverter(pConverter.GetAddressOf());
+    if (FAILED(hr)) return false;
+
+    hr = pConverter->Initialize(
+        pBitmap.Get(),
+        GUID_WICPixelFormat24bppBGR,
+        WICBitmapDitherTypeNone,
+        nullptr,
+        0.0,
+        WICBitmapPaletteTypeCustom
+    );
+    if (FAILED(hr)) return false;
+
+    // 3. Создаем поток памяти для JPEG
     IStream* pStream = nullptr;
-    HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
+    hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
     if (FAILED(hr)) return false;
 
     ComPtr<IStream> spStream;
     spStream.Attach(pStream);
 
-    // Создаем JPEG энкодер
+    // 4. Создаем JPEG энкодер
     ComPtr<IWICBitmapEncoder> pEncoder;
     hr = m_wicFactory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, pEncoder.GetAddressOf());
     if (FAILED(hr)) return false;
@@ -84,13 +112,12 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     hr = pEncoder->Initialize(spStream.Get(), WICBitmapEncoderNoCache);
     if (FAILED(hr)) return false;
 
-    // Создаем новый кадр
+    // 5. Создаем кадр с настройками качества
     ComPtr<IWICBitmapFrameEncode> pFrameEncode;
     ComPtr<IPropertyBag2> pPropertyBag;
     hr = pEncoder->CreateNewFrame(pFrameEncode.GetAddressOf(), pPropertyBag.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Устанавливаем качество JPEG
     PROPBAG2 option = { 0 };
     option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
     VARIANT varValue;
@@ -105,16 +132,12 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     hr = pFrameEncode->SetSize(rawFrame.width, rawFrame.height);
     if (FAILED(hr)) return false;
 
-    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
     hr = pFrameEncode->SetPixelFormat(&format);
     if (FAILED(hr)) return false;
 
-    hr = pFrameEncode->WritePixels(
-        rawFrame.height,
-        static_cast<UINT>(rawFrame.stride),
-        static_cast<UINT>(rawFrame.pixels.size()),
-        const_cast<BYTE*>(rawFrame.pixels.data())
-    );
+    // 6. Записываем сконвертированные пиксели из IWICFormatConverter
+    hr = pFrameEncode->WriteSource(pConverter.Get(), nullptr);
     if (FAILED(hr)) return false;
 
     hr = pFrameEncode->Commit();
@@ -123,7 +146,7 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     hr = pEncoder->Commit();
     if (FAILED(hr)) return false;
 
-    // Получаем HGLOBAL из потока для извлечения готовых байтов
+    // 7. Извлекаем готовые JPEG-байты из потока
     HGLOBAL hGlobal = nullptr;
     hr = GetHGlobalFromStream(spStream.Get(), &hGlobal);
     if (FAILED(hr) || !hGlobal) return false;

@@ -188,19 +188,52 @@ bool StudentViewDialog::eventFilter(QObject* obj, QEvent* event) {
             auto* me = static_cast<QMouseEvent*>(event);
             sendRemoteMouse(me, 2); // release
             return true;
+        } else if (event->type() == QEvent::Wheel) {
+            auto* we = static_cast<QWheelEvent*>(event);
+            QPointF normPos = mapToImageNormalized(we->position());
+            if (normPos.x() >= 0.0f) {
+                QPoint angleDelta = we->angleDelta();
+                int16_t deltaX = static_cast<int16_t>(angleDelta.x() / 120);
+                int16_t deltaY = static_cast<int16_t>(angleDelta.y() / 120);
+                m_session->sendMouseScroll(
+                    static_cast<float>(normPos.x()),
+                    static_cast<float>(normPos.y()),
+                    deltaX, deltaY);
+            }
+            return true;
         }
     }
     return QDialog::eventFilter(obj, event);
 }
 
-void StudentViewDialog::sendRemoteMouse(QMouseEvent* event, uint8_t action) {
-    if (!m_session || m_videoLabel->width() == 0 || m_videoLabel->height() == 0) return;
+QPointF StudentViewDialog::mapToImageNormalized(QPointF localPos) {
+    if (m_lastImage.isNull() || m_videoLabel->width() == 0 || m_videoLabel->height() == 0) {
+        return QPointF(-1.0, -1.0);
+    }
 
-    float normX = static_cast<float>(event->position().x()) / static_cast<float>(m_videoLabel->width());
-    float normY = static_cast<float>(event->position().y()) / static_cast<float>(m_videoLabel->height());
+    // Вычисляем реальную область масштабированного изображения внутри QLabel
+    QSize labelSize = m_videoLabel->size();
+    QSize imgSize = m_lastImage.size().scaled(labelSize, Qt::KeepAspectRatio);
+    int offsetX = (labelSize.width() - imgSize.width()) / 2;
+    int offsetY = (labelSize.height() - imgSize.height()) / 2;
+
+    float normX = static_cast<float>(localPos.x() - offsetX) / static_cast<float>(imgSize.width());
+    float normY = static_cast<float>(localPos.y() - offsetY) / static_cast<float>(imgSize.height());
 
     normX = qBound(0.0f, normX, 1.0f);
     normY = qBound(0.0f, normY, 1.0f);
+
+    return QPointF(normX, normY);
+}
+
+void StudentViewDialog::sendRemoteMouse(QMouseEvent* event, uint8_t action) {
+    if (!m_session) return;
+
+    QPointF normPos = mapToImageNormalized(event->position());
+    if (normPos.x() < 0.0f) return;
+
+    float normX = static_cast<float>(normPos.x());
+    float normY = static_cast<float>(normPos.y());
 
     if (action == 0) {
         m_session->sendMouseMove(normX, normY);

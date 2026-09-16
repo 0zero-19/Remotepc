@@ -134,12 +134,13 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
 // =============================================================================
 
 void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockMgr) {
-    std::vector<uint8_t> buffer(4096);
+    std::vector<uint8_t> recvBuf(8192);
+    std::vector<uint8_t> accumBuffer;  // Накопительный буфер для TCP-потока
 
     while (g_running.load()) {
         int received = recv(tcpSocket,
-                            reinterpret_cast<char*>(buffer.data()),
-                            static_cast<int>(buffer.size()), 0);
+                            reinterpret_cast<char*>(recvBuf.data()),
+                            static_cast<int>(recvBuf.size()), 0);
 
         if (received <= 0) {
             if (received == 0) {
@@ -161,52 +162,83 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
             break;
         }
 
-        // Парсим заголовок
-        PacketHeader header;
-        if (!parseHeader(buffer.data(), received, header)) {
-            continue;
+        // Добавляем полученные данные в накопительный буфер
+        accumBuffer.insert(accumBuffer.end(), recvBuf.begin(), recvBuf.begin() + received);
+
+        // Извлекаем полные пакеты из буфера
+        while (accumBuffer.size() >= sizeof(PacketHeader)) {
+            // Проверяем magic number
+            PacketHeader header;
+            if (!parseHeader(accumBuffer.data(), accumBuffer.size(), header)) {
+                // Не совпал magic — ищем следующий magic в буфере
+                bool found = false;
+                for (size_t i = 1; i <= accumBuffer.size() - sizeof(uint32_t); ++i) {
+                    uint32_t val;
+                    std::memcpy(&val, accumBuffer.data() + i, sizeof(uint32_t));
+                    if (val == PROTOCOL_MAGIC) {
+                        accumBuffer.erase(accumBuffer.begin(), accumBuffer.begin() + i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    accumBuffer.clear();
+                    break;
+                }
+                continue;
+            }
+
+            size_t totalPacketSize = sizeof(PacketHeader) + header.payloadSize;
+            if (accumBuffer.size() < totalPacketSize) {
+                // Пакет получен не полностью — ждём следующий recv
+                break;
+            }
+
+            // Извлекаем полный пакет и обрабатываем
+            auto type = static_cast<PacketType>(header.type);
+            const uint8_t* payload = accumBuffer.data() + sizeof(PacketHeader);
+            size_t payloadSize = header.payloadSize;
+
+            switch (type) {
+                case PacketType::LOCK_INPUT:
+                    lockMgr.lock();
+                    std::cout << "[Agent] >>> Экран ЗАБЛОКИРОВАН преподавателем" << std::endl;
+                    break;
+
+                case PacketType::UNLOCK_INPUT:
+                    lockMgr.unlock();
+                    std::cout << "[Agent] >>> Экран РАЗБЛОКИРОВАН преподавателем" << std::endl;
+                    break;
+
+                case PacketType::MOUSE_MOVE:
+                case PacketType::MOUSE_CLICK:
+                case PacketType::MOUSE_SCROLL:
+                case PacketType::KEY_PRESS:
+                case PacketType::KEY_RELEASE:
+                    injector.processCommand(header, payload, payloadSize);
+                    break;
+
+                case PacketType::SHUTDOWN_AGENT:
+                    std::cout << "[Agent] Запрошено завершение работы от сервера" << std::endl;
+                    g_running.store(false);
+                    break;
+
+                default:
+                    break;
+            }
+
+            // Отправляем ACK
+            AckPayload ack;
+            ack.ackedSequence = header.sequence;
+            ack.ackedType     = header.type;
+            ack.statusCode    = 0;
+            auto ackPacket = makePacket(PacketType::ACK, ack, g_sequence.fetch_add(1));
+            send(tcpSocket, reinterpret_cast<const char*>(ackPacket.data()),
+                 static_cast<int>(ackPacket.size()), 0);
+
+            // Удаляем обработанный пакет из буфера
+            accumBuffer.erase(accumBuffer.begin(), accumBuffer.begin() + totalPacketSize);
         }
-
-        auto type = static_cast<PacketType>(header.type);
-        const uint8_t* payload = buffer.data() + sizeof(PacketHeader);
-        size_t payloadSize = header.payloadSize;
-
-        switch (type) {
-            case PacketType::LOCK_INPUT:
-                lockMgr.lock();
-                std::cout << "[Agent] >>> Экран ЗАБЛОКИРОВАН преподавателем" << std::endl;
-                break;
-
-            case PacketType::UNLOCK_INPUT:
-                lockMgr.unlock();
-                std::cout << "[Agent] >>> Экран РАЗБЛОКИРОВАН преподавателем" << std::endl;
-                break;
-
-            case PacketType::MOUSE_MOVE:
-            case PacketType::MOUSE_CLICK:
-            case PacketType::MOUSE_SCROLL:
-            case PacketType::KEY_PRESS:
-            case PacketType::KEY_RELEASE:
-                injector.processCommand(header, payload, payloadSize);
-                break;
-
-            case PacketType::SHUTDOWN_AGENT:
-                std::cout << "[Agent] Запрошено завершение работы от сервера" << std::endl;
-                g_running.store(false);
-                break;
-
-            default:
-                break;
-        }
-
-        // Отправляем ACK
-        AckPayload ack;
-        ack.ackedSequence = header.sequence;
-        ack.ackedType     = header.type;
-        ack.statusCode    = 0;
-        auto ackPacket = makePacket(PacketType::ACK, ack, g_sequence.fetch_add(1));
-        send(tcpSocket, reinterpret_cast<const char*>(ackPacket.data()),
-             static_cast<int>(ackPacket.size()), 0);
     }
 }
 

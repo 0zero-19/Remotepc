@@ -160,12 +160,26 @@ bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
             now.time_since_epoch()).count());
     outFrame.width  = m_width;
     outFrame.height = m_height;
-    outFrame.stride = mapped.RowPitch;
 
-    // Копируем пиксели
-    const size_t dataSize = static_cast<size_t>(mapped.RowPitch) * m_height;
-    outFrame.pixels.resize(dataSize);
-    std::memcpy(outFrame.pixels.data(), mapped.pData, dataSize);
+    // Нормализуем stride: убираем GPU padding (RowPitch может быть > width*4)
+    const uint32_t expectedStride = m_width * 4;
+    outFrame.stride = expectedStride;
+    outFrame.pixels.resize(static_cast<size_t>(expectedStride) * m_height);
+
+    const uint8_t* src = static_cast<const uint8_t*>(mapped.pData);
+    uint8_t* dst = outFrame.pixels.data();
+
+    if (mapped.RowPitch == expectedStride) {
+        // Stride совпадает — можно копировать одним блоком
+        std::memcpy(dst, src, static_cast<size_t>(expectedStride) * m_height);
+    } else {
+        // Stride содержит GPU padding — копируем построчно
+        for (uint32_t row = 0; row < m_height; ++row) {
+            std::memcpy(dst + row * expectedStride,
+                        src + row * mapped.RowPitch,
+                        expectedStride);
+        }
+    }
 
     // Освобождаем ресурсы
     m_context->Unmap(m_stagingTexture.Get(), 0);

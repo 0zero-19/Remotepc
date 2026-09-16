@@ -118,9 +118,8 @@ void InputInjector::processCommand(const PacketHeader& header, const uint8_t* pa
     switch (type) {
         case PacketType::MOUSE_MOVE: {
             MouseMovePayload data;
-            if (parsePayload<MouseMovePayload>(
-                    reinterpret_cast<const uint8_t*>(&header), 
-                    sizeof(header) + size, data)) {
+            if (size >= sizeof(MouseMovePayload)) {
+                std::memcpy(&data, payload, sizeof(MouseMovePayload));
                 moveMouse(data.normalizedX, data.normalizedY);
             }
             break;
