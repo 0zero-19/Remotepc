@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Единая директория для всех скомпилированных .exe
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
+
 # MSVC-specific flags
 if(MSVC)
     add_compile_options(/W4 /utf-8)
@@ -20,17 +25,21 @@ if(MSVC)
 endif()
 
 # ============================================
-# Qt6 — find package
-# ============================================
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
-qt_standard_project_setup()
-
-# ============================================
-# Subprojects
+# Subprojects (CommonLib & StudentAgent)
 # ============================================
 add_subdirectory(common)
 add_subdirectory(client)
-add_subdirectory(server)
+
+# ============================================
+# Qt6 — find package (optional for client-only builds)
+# ============================================
+find_package(Qt6 COMPONENTS Core Gui Widgets Network QUIET)
+if(Qt6_FOUND)
+    qt_standard_project_setup()
+    add_subdirectory(server)
+else()
+    message(STATUS "Qt6 not found — TeacherPanel skipped (StudentAgent only)")
+endif()
 
 # ============================================
 # Tests (optional)
@@ -40,3 +49,4 @@ if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+

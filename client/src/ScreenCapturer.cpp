@@ -26,17 +26,28 @@ bool ScreenCapturer::initialize(uint32_t outputIndex) {
         shutdown();
     }
 
-    if (!initD3D11()) {
-        std::cerr << "[ScreenCapturer] Failed to init D3D11" << std::endl;
-        return false;
+    m_useGdiFallback = false;
+
+    // Пытаемся инициализировать DXGI Desktop Duplication
+    bool dxgiOk = initD3D11() && initDuplication(outputIndex);
+
+    if (dxgiOk) {
+        m_initialized = true;
+        std::cout << "[ScreenCapturer] Захват экрана: DXGI Desktop Duplication ("
+                  << m_width << "x" << m_height << ")" << std::endl;
+        return true;
     }
 
-    if (!initDuplication(outputIndex)) {
-        std::cerr << "[ScreenCapturer] Failed to init Desktop Duplication" << std::endl;
-        return false;
-    }
+    // Если DXGI недоступен (гибридная графика / права / headless) — используем GDI BitBlt
+    std::cout << "[ScreenCapturer] DXGI недоступен, включен резервный режим GDI BitBlt" << std::endl;
+    m_width  = static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
+    m_height = static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
+    if (m_width == 0) m_width = 1920;
+    if (m_height == 0) m_height = 1080;
 
+    m_useGdiFallback = true;
     m_initialized = true;
+    std::cout << "[ScreenCapturer] Захват экрана: GDI (" << m_width << "x" << m_height << ")" << std::endl;
     return true;
 }
 
@@ -111,9 +122,22 @@ bool ScreenCapturer::initDuplication(uint32_t outputIndex) {
 }
 
 bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
-    if (!m_initialized || !m_duplication) {
-        return false;
+    if (!m_initialized) return false;
+
+    if (m_useGdiFallback) {
+        return captureFrameGDI(outFrame);
     }
+
+    bool success = captureFrameDXGI(outFrame);
+    if (!success && !m_duplication) {
+        // Если DXGI потерял соединение — переходим на GDI
+        return captureFrameGDI(outFrame);
+    }
+    return success;
+}
+
+bool ScreenCapturer::captureFrameDXGI(video::RawFrame& outFrame) {
+    if (!m_duplication) return false;
 
     // Получаем следующий кадр (таймаут 100 мс)
     ComPtr<IDXGIResource> desktopResource;
@@ -126,10 +150,13 @@ bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
     }
 
     if (FAILED(hr)) {
-        // Возможно нужна реинициализация (смена разрешения, UAC и т.д.)
         if (hr == DXGI_ERROR_ACCESS_LOST) {
+            std::cout << "[ScreenCapturer] DXGI доступ потерян, переключение на GDI" << std::endl;
             shutdown();
-            initialize();
+            m_useGdiFallback = true;
+            m_initialized = true;
+            m_width  = static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
+            m_height = static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
         }
         return false;
     }
@@ -170,10 +197,8 @@ bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
     uint8_t* dst = outFrame.pixels.data();
 
     if (mapped.RowPitch == expectedStride) {
-        // Stride совпадает — можно копировать одним блоком
         std::memcpy(dst, src, static_cast<size_t>(expectedStride) * m_height);
     } else {
-        // Stride содержит GPU padding — копируем построчно
         for (uint32_t row = 0; row < m_height; ++row) {
             std::memcpy(dst + row * expectedStride,
                         src + row * mapped.RowPitch,
@@ -188,13 +213,72 @@ bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
     return true;
 }
 
+bool ScreenCapturer::captureFrameGDI(video::RawFrame& outFrame) {
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    if (screenW <= 0 || screenH <= 0) return false;
+
+    m_width  = static_cast<uint32_t>(screenW);
+    m_height = static_cast<uint32_t>(screenH);
+
+    HDC hScreenDC = GetDC(nullptr);
+    if (!hScreenDC) return false;
+
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
+    if (!hMemDC) {
+        ReleaseDC(nullptr, hScreenDC);
+        return false;
+    }
+
+    BITMAPINFOHEADER bi = {};
+    bi.biSize        = sizeof(BITMAPINFOHEADER);
+    bi.biWidth       = screenW;
+    bi.biHeight      = -screenH; // Top-down
+    bi.biPlanes      = 1;
+    bi.biBitCount    = 32;
+    bi.biCompression = BI_RGB;
+
+    void* pBits = nullptr;
+    HBITMAP hBitmap = CreateDIBSection(hMemDC, reinterpret_cast<const BITMAPINFO*>(&bi),
+                                       DIB_RGB_COLORS, &pBits, nullptr, 0);
+    if (!hBitmap || !pBits) {
+        DeleteDC(hMemDC);
+        ReleaseDC(nullptr, hScreenDC);
+        return false;
+    }
+
+    HBITMAP hOldBitmap = static_cast<HBITMAP>(SelectObject(hMemDC, hBitmap));
+    BitBlt(hMemDC, 0, 0, screenW, screenH, hScreenDC, 0, 0, SRCCOPY | CAPTUREBLT);
+
+    auto now = std::chrono::high_resolution_clock::now();
+    outFrame.timestamp = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now.time_since_epoch()).count());
+    outFrame.width  = m_width;
+    outFrame.height = m_height;
+    outFrame.stride = m_width * 4;
+
+    size_t totalBytes = static_cast<size_t>(outFrame.stride) * m_height;
+    outFrame.pixels.resize(totalBytes);
+    std::memcpy(outFrame.pixels.data(), pBits, totalBytes);
+
+    SelectObject(hMemDC, hOldBitmap);
+    DeleteObject(hBitmap);
+    DeleteDC(hMemDC);
+    ReleaseDC(nullptr, hScreenDC);
+
+    return true;
+}
+
 void ScreenCapturer::shutdown() {
     m_duplication.Reset();
     m_stagingTexture.Reset();
     m_context.Reset();
     m_device.Reset();
     m_initialized = false;
+    m_useGdiFallback = false;
 }
 
 } // namespace client
 } // namespace cm
+

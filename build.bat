@@ -1,14 +1,33 @@
 @echo off
 setlocal
 echo ===================================================
-echo   ClassroomMonitor - Building Project (MSVC + Qt6)
+echo   ClassroomMonitor - Building Project
 echo ===================================================
 
-set CMAKE_PREFIX_PATH=C:\Qt\6.7.2\msvc2019_64
-set PATH=%PATH%;C:\Program Files\CMake\bin;C:\Qt\6.7.2\msvc2019_64\bin
+:: Поиск Qt6 в стандартных путях
+set QT_PATH=
+if exist "C:\Qt\6.7.2\msvc2019_64" set QT_PATH=C:\Qt\6.7.2\msvc2019_64
+if exist "C:\Qt\6.6.3\msvc2019_64" set QT_PATH=C:\Qt\6.6.3\msvc2019_64
+if exist "C:\Qt\6.5.3\msvc2019_64" set QT_PATH=C:\Qt\6.5.3\msvc2019_64
+if exist "C:\Qt\6.8.0\msvc2019_64" set QT_PATH=C:\Qt\6.8.0\msvc2019_64
 
+if not "%QT_PATH%"=="" (
+    set CMAKE_PREFIX_PATH=%QT_PATH%
+    set PATH=%PATH%;C:\Program Files\CMake\bin;%QT_PATH%\bin
+    echo [i] Найдена установка Qt6: %QT_PATH%
+) else (
+    set PATH=%PATH%;C:\Program Files\CMake\bin
+    echo [i] Qt6 не найден в C:\Qt\ - будет собран только StudentAgent (клиент)
+)
+
+echo.
 echo [1/3] Configuring CMake...
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.7.2/msvc2019_64"
+if not "%QT_PATH%"=="" (
+    cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="%QT_PATH%"
+) else (
+    cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+)
+
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [ERROR] CMake configuration failed!
@@ -28,15 +47,18 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [3/3] Deploying Qt6 DLLs to build\Debug...
-if exist "C:\Qt\6.7.2\msvc2019_64\bin\windeployqt.exe" (
-    "C:\Qt\6.7.2\msvc2019_64\bin\windeployqt.exe" --debug "build\Debug\TeacherPanel.exe" > nul 2>&1
+echo [3/3] Deploying DLLs...
+if not "%QT_PATH%"=="" (
+    if exist "%QT_PATH%\bin\windeployqt.exe" (
+        "%QT_PATH%\bin\windeployqt.exe" --debug "build\Debug\TeacherPanel.exe" > nul 2>&1
+    )
 )
 
 echo.
 echo ===================================================
-echo   BUILD SUCCESSFUL! All DLLs deployed!
-echo   Run teacher panel: run_teacher.bat (or double-click build\Debug\TeacherPanel.exe)
-echo   Run student agent: run_student.bat (or double-click build\Debug\StudentAgent.exe)
+echo   СБОРКА УСПЕШНО ЗАВЕРШЕНА!
+echo   Запуск преподавателя: run_teacher.bat
+echo   Запуск студента:      run_student.bat
 echo ===================================================
 pause
+

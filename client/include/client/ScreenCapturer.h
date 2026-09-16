@@ -46,16 +46,20 @@ public:
 private:
     bool initD3D11();
     bool initDuplication(uint32_t outputIndex);
+    bool captureFrameDXGI(video::RawFrame& outFrame);
+    bool captureFrameGDI(video::RawFrame& outFrame);
 
     ComPtr<ID3D11Device>            m_device;
     ComPtr<ID3D11DeviceContext>     m_context;
     ComPtr<IDXGIOutputDuplication>  m_duplication;
     ComPtr<ID3D11Texture2D>         m_stagingTexture;
 
-    uint32_t m_width  = 0;
-    uint32_t m_height = 0;
-    bool     m_initialized = false;
+    uint32_t m_width          = 0;
+    uint32_t m_height         = 0;
+    bool     m_initialized    = false;
+    bool     m_useGdiFallback = false;
 };
 
 } // namespace client
 } // namespace cm
+

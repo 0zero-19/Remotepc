@@ -26,6 +26,21 @@ void InputInjector::normalizedToAbsolute(float nx, float ny, int& outX, int& out
 }
 
 void InputInjector::moveMouse(float normalizedX, float normalizedY) {
+    normalizedX = (normalizedX < 0.0f) ? 0.0f : (normalizedX > 1.0f) ? 1.0f : normalizedX;
+    normalizedY = (normalizedY < 0.0f) ? 0.0f : (normalizedY > 1.0f) ? 1.0f : normalizedY;
+
+    m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+    m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int screenW = (m_screenWidth > 0) ? m_screenWidth : 1920;
+    int screenH = (m_screenHeight > 0) ? m_screenHeight : 1080;
+
+    int screenX = static_cast<int>(normalizedX * (screenW - 1));
+    int screenY = static_cast<int>(normalizedY * (screenH - 1));
+
+    // 1. Прямое перемещение курсора через SetCursorPos (100% надёжность)
+    SetCursorPos(screenX, screenY);
+
+    // 2. Генерация события через SendInput для приложений с обработкой raw mouse
     int absX, absY;
     normalizedToAbsolute(normalizedX, normalizedY, absX, absY);
 
@@ -33,17 +48,30 @@ void InputInjector::moveMouse(float normalizedX, float normalizedY) {
     input.type           = INPUT_MOUSE;
     input.mi.dx          = absX;
     input.mi.dy          = absY;
-    input.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    input.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
 
     SendInput(1, &input, sizeof(INPUT));
 }
 
 void InputInjector::clickMouse(float normalizedX, float normalizedY,
                                 uint8_t button, uint8_t action) {
+    normalizedX = (normalizedX < 0.0f) ? 0.0f : (normalizedX > 1.0f) ? 1.0f : normalizedX;
+    normalizedY = (normalizedY < 0.0f) ? 0.0f : (normalizedY > 1.0f) ? 1.0f : normalizedY;
+
+    m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+    m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int screenW = (m_screenWidth > 0) ? m_screenWidth : 1920;
+    int screenH = (m_screenHeight > 0) ? m_screenHeight : 1080;
+
+    int screenX = static_cast<int>(normalizedX * (screenW - 1));
+    int screenY = static_cast<int>(normalizedY * (screenH - 1));
+
+    // Перемещаем курсор в точку клика
+    SetCursorPos(screenX, screenY);
+
     int absX, absY;
     normalizedToAbsolute(normalizedX, normalizedY, absX, absY);
 
-    // Определяем флаги кнопки
     DWORD downFlag = 0, upFlag = 0;
     switch (button) {
         case 0: downFlag = MOUSEEVENTF_LEFTDOWN;   upFlag = MOUSEEVENTF_LEFTUP;   break;
@@ -57,23 +85,21 @@ void InputInjector::clickMouse(float normalizedX, float normalizedY,
         input.type       = INPUT_MOUSE;
         input.mi.dx      = absX;
         input.mi.dy      = absY;
-        input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE;
+        input.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
         SendInput(1, &input, sizeof(INPUT));
     };
 
     switch (action) {
-        case 0: sendMouseEvent(downFlag); break;             // Press
-        case 1: sendMouseEvent(upFlag); break;               // Release
-        case 2: sendMouseEvent(downFlag); sendMouseEvent(upFlag); break;  // Click
+        case 0: sendMouseEvent(downFlag); break;                             // Press
+        case 1: sendMouseEvent(upFlag); break;                               // Release
+        case 2: sendMouseEvent(downFlag); sendMouseEvent(upFlag); break;    // Click
     }
 }
 
 void InputInjector::scrollMouse(float normalizedX, float normalizedY,
                                  int16_t deltaX, int16_t deltaY) {
-    // Сначала перемещаем курсор
     moveMouse(normalizedX, normalizedY);
 
-    // Вертикальная прокрутка
     if (deltaY != 0) {
         INPUT input = {};
         input.type           = INPUT_MOUSE;
@@ -82,7 +108,6 @@ void InputInjector::scrollMouse(float normalizedX, float normalizedY,
         SendInput(1, &input, sizeof(INPUT));
     }
 
-    // Горизонтальная прокрутка
     if (deltaX != 0) {
         INPUT input = {};
         input.type           = INPUT_MOUSE;
@@ -96,8 +121,8 @@ void InputInjector::pressKey(uint16_t virtualKeyCode, uint16_t scanCode, uint32_
     INPUT input = {};
     input.type        = INPUT_KEYBOARD;
     input.ki.wVk      = virtualKeyCode;
-    input.ki.wScan     = scanCode;
-    input.ki.dwFlags   = flags;
+    input.ki.wScan    = scanCode;
+    input.ki.dwFlags  = flags;
 
     SendInput(1, &input, sizeof(INPUT));
 }
@@ -106,8 +131,8 @@ void InputInjector::releaseKey(uint16_t virtualKeyCode, uint16_t scanCode, uint3
     INPUT input = {};
     input.type        = INPUT_KEYBOARD;
     input.ki.wVk      = virtualKeyCode;
-    input.ki.wScan     = scanCode;
-    input.ki.dwFlags   = flags | KEYEVENTF_KEYUP;
+    input.ki.wScan    = scanCode;
+    input.ki.dwFlags  = flags | KEYEVENTF_KEYUP;
 
     SendInput(1, &input, sizeof(INPUT));
 }
@@ -163,3 +188,4 @@ void InputInjector::processCommand(const PacketHeader& header, const uint8_t* pa
 
 } // namespace client
 } // namespace cm
+

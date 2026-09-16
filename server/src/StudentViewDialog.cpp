@@ -150,10 +150,12 @@ void StudentViewDialog::onUnlockClicked() {
 void StudentViewDialog::onToggleControl() {
     m_remoteControlEnabled = !m_remoteControlEnabled;
     if (m_remoteControlEnabled) {
-        m_controlBtn->setText("🖱️ Управление: ВКЛ (Активно)");
+        m_controlBtn->setText("🟢 Управление: ВКЛ (Активно)");
         m_controlBtn->setStyleSheet(
-            "QPushButton { background-color: #00e676; color: black; border-radius: 4px; padding: 6px 12px; font-weight: bold; }"
+            "QPushButton { background-color: #00e676; color: #000; border-radius: 4px; padding: 6px 14px; font-weight: bold; border: 2px solid #00c853; }"
         );
+        m_videoLabel->setFocusPolicy(Qt::StrongFocus);
+        m_videoLabel->setFocus();
         setFocus();
     } else {
         m_controlBtn->setText("🖱️ Управление: ВЫКЛ");
@@ -182,10 +184,16 @@ bool StudentViewDialog::eventFilter(QObject* obj, QEvent* event) {
             return true;
         } else if (event->type() == QEvent::MouseButtonPress) {
             auto* me = static_cast<QMouseEvent*>(event);
+            m_videoLabel->setFocus();
             sendRemoteMouse(me, 1); // press
             return true;
         } else if (event->type() == QEvent::MouseButtonRelease) {
             auto* me = static_cast<QMouseEvent*>(event);
+            sendRemoteMouse(me, 2); // release
+            return true;
+        } else if (event->type() == QEvent::MouseButtonDblClick) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            sendRemoteMouse(me, 1); // press
             sendRemoteMouse(me, 2); // release
             return true;
         } else if (event->type() == QEvent::Wheel) {
@@ -217,8 +225,15 @@ QPointF StudentViewDialog::mapToImageNormalized(QPointF localPos) {
     int offsetX = (labelSize.width() - imgSize.width()) / 2;
     int offsetY = (labelSize.height() - imgSize.height()) / 2;
 
-    float normX = static_cast<float>(localPos.x() - offsetX) / static_cast<float>(imgSize.width());
-    float normY = static_cast<float>(localPos.y() - offsetY) / static_cast<float>(imgSize.height());
+    float imgX = static_cast<float>(localPos.x() - offsetX);
+    float imgY = static_cast<float>(localPos.y() - offsetY);
+
+    if (imgSize.width() <= 0 || imgSize.height() <= 0) {
+        return QPointF(-1.0, -1.0);
+    }
+
+    float normX = imgX / static_cast<float>(imgSize.width());
+    float normY = imgY / static_cast<float>(imgSize.height());
 
     normX = qBound(0.0f, normX, 1.0f);
     normY = qBound(0.0f, normY, 1.0f);
@@ -272,3 +287,4 @@ void StudentViewDialog::keyReleaseEvent(QKeyEvent* event) {
 
 } // namespace server
 } // namespace cm
+
