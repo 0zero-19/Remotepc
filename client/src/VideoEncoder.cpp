@@ -57,8 +57,8 @@ bool VideoEncoder::initialize(const video::EncoderConfig& config) {
         return false;
     }
 
-    // Качество JPEG: 45% для быстрого стриминга (меньше байт = меньше задержки)
-    m_compressionQuality = 0.45f;
+    // Качество JPEG: 50% для чёткого и быстрого стриминга
+    m_compressionQuality = 0.50f;
     m_frameCount = 0;
     m_initialized = true;
 
@@ -72,20 +72,22 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
     if (!m_initialized || !m_wicFactory) return false;
     if (rawFrame.pixels.empty() || rawFrame.width == 0 || rawFrame.height == 0) return false;
 
-    // --- Шаг 1: Конвертируем BGRA → BGR (убираем альфа-канал вручную) ---
-    // JPEG не поддерживает альфа-канал. Без этого шага WIC неправильно
-    // интерпретирует 4-байтовые пиксели, вызывая вертикальные полосы.
+    // --- Шаг 1: Конвертируем BGRA → BGR (переиспользуем буфер без постоянных аллокаций) ---
     const uint32_t bgrStride = rawFrame.width * 3;
     // Выравниваем stride до 4 байт (требование WIC/GDI)
     const uint32_t bgrStridePadded = (bgrStride + 3) & ~3u;
     const size_t bgrSize = static_cast<size_t>(bgrStridePadded) * rawFrame.height;
-    std::vector<uint8_t> bgrPixels(bgrSize, 0);
+
+    if (m_bgrBuffer.size() < bgrSize) {
+        m_bgrBuffer.resize(bgrSize);
+    }
+    uint8_t* bgrPixels = m_bgrBuffer.data();
 
     const uint32_t srcStride = rawFrame.stride;  // width * 4, уже нормализован
 
     for (uint32_t y = 0; y < rawFrame.height; ++y) {
         const uint8_t* src = rawFrame.pixels.data() + y * srcStride;
-        uint8_t* dst = bgrPixels.data() + y * bgrStridePadded;
+        uint8_t* dst = bgrPixels + y * bgrStridePadded;
         for (uint32_t x = 0; x < rawFrame.width; ++x) {
             dst[x * 3 + 0] = src[x * 4 + 0]; // B
             dst[x * 3 + 1] = src[x * 4 + 1]; // G
@@ -168,7 +170,7 @@ bool VideoEncoder::encodeFrame(const video::RawFrame& rawFrame, video::EncodedFr
         rawFrame.height,
         bgrStridePadded,
         static_cast<UINT>(bgrSize),
-        bgrPixels.data()
+        bgrPixels
     );
     if (FAILED(hr)) {
         std::cerr << "[VideoEncoder] WritePixels failed: 0x"
@@ -243,6 +245,8 @@ bool VideoEncoder::updateConfig(const video::EncoderConfig& config) {
 }
 
 void VideoEncoder::shutdown() {
+    m_bgrBuffer.clear();
+    m_bgrBuffer.shrink_to_fit();
     m_wicFactory.Reset();
     m_initialized = false;
     if (m_comInitialized) {

@@ -34,10 +34,13 @@
 #include <vector>
 #include <mutex>
 
+#include <timeapi.h>
+
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Gdi32.lib")
+#pragma comment(lib, "winmm.lib")
 
 using namespace cm;
 using namespace cm::client;
@@ -420,8 +423,7 @@ void trayThreadFunc() {
 // Sending video stream (45 FPS)
 // =============================================================================
 
-void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& serverAddr,
-                       net::AgentConfig& config) {
+void videoStreamThread(SOCKET tcpSocket, net::AgentConfig& config) {
     ScreenCapturer capturer;
     VideoEncoder encoder;
 
@@ -447,16 +449,19 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
        << " @ " << encConfig.fps << " FPS";
     logMessage(ss.str());
 
-    auto frameIntervalUs = std::chrono::microseconds(1000000 / config.targetFps);
+    // Устанавливаем системную точность таймеров Windows в 1 мс
+    timeBeginPeriod(1);
+
+    auto frameInterval = std::chrono::microseconds(1000000 / config.targetFps);
+    video::RawFrame rawFrame;
+    video::EncodedFrame encoded;
 
     while (g_running.load()) {
         auto frameStart = std::chrono::steady_clock::now();
 
-        // Захватываем кадр
-        video::RawFrame rawFrame;
+        // Захватываем кадр (буфер переиспользуется)
         if (capturer.captureFrame(rawFrame)) {
-            // Кодируем кадр в JPEG
-            video::EncodedFrame encoded;
+            // Кодируем кадр в JPEG (буфер переиспользуется)
             if (encoder.encodeFrame(rawFrame, encoded)) {
                 // Формируем пакет
                 VideoFrameHeader frameHeader;
@@ -474,32 +479,29 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
                     g_sequence.fetch_add(1)
                 );
 
-                // Отправляем кадр по TCP (надёжная доставка)
+                // Отправляем кадр по TCP (быстро и надёжно без дублирования)
                 send(tcpSocket,
                      reinterpret_cast<const char*>(packet.data()),
                      static_cast<int>(packet.size()),
                      0);
-
-                // Также дублируем по UDP для минимальной задержки (если кадр маленький)
-                if (packet.size() <= net::MAX_UDP_PACKET_SIZE) {
-                    sendto(udpSocket,
-                           reinterpret_cast<const char*>(packet.data()),
-                           static_cast<int>(packet.size()),
-                           0,
-                           reinterpret_cast<const sockaddr*>(&serverAddr),
-                           sizeof(serverAddr));
-                }
             }
         }
 
-        // Точное ограничение FPS с использованием yield вместо sleep
-        // (Windows sleep может спать на 15мс дольше заданного)
-        auto targetEnd = frameStart + frameIntervalUs;
-        while (std::chrono::steady_clock::now() < targetEnd) {
-            std::this_thread::yield();
+        // Высокоточное ограничение FPS без 100% загрузки процессора
+        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - frameStart);
+        if (elapsed < frameInterval) {
+            auto sleepDuration = frameInterval - elapsed;
+            if (sleepDuration > std::chrono::milliseconds(2)) {
+                std::this_thread::sleep_for(sleepDuration - std::chrono::milliseconds(1));
+            }
+            while (std::chrono::steady_clock::now() < (frameStart + frameInterval)) {
+                std::this_thread::yield();
+            }
         }
     }
 
+    timeEndPeriod(1);
     capturer.shutdown();
     encoder.shutdown();
 }
@@ -778,25 +780,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         g_clientId.store(1);
         g_running.store(true);
 
-        // --- UDP сокет для видео ---
-        SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (udpSocket == INVALID_SOCKET) {
-            logMessage("[Agent] [ERROR] Ошибка создания UDP сокета");
-            closesocket(tcpSocket);
-            break;
-        }
-
-        sockaddr_in udpServerAddr = {};
-        udpServerAddr.sin_family = AF_INET;
-        udpServerAddr.sin_port   = htons(config.videoPort);
-        inet_pton(AF_INET, config.serverHost.c_str(), &udpServerAddr.sin_addr);
-
         // --- Объекты управления ---
         InputInjector injector;
         LockManager lockMgr;
 
         // --- Запускаем рабочие потоки ---
-        std::thread videoThread(videoStreamThread, tcpSocket, udpSocket, udpServerAddr, std::ref(config));
+        std::thread videoThread(videoStreamThread, tcpSocket, std::ref(config));
         std::thread cmdThread(commandThread, tcpSocket, std::ref(injector), std::ref(lockMgr));
         std::thread hbThread(heartbeatThread, tcpSocket);
 
@@ -812,7 +801,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         if (cmdThread.joinable()) cmdThread.join();
         if (hbThread.joinable()) hbThread.join();
 
-        closesocket(udpSocket);
         closesocket(tcpSocket);
 
         logMessage("[Agent] Сессия с сервером завершена.");

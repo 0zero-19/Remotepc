@@ -40,8 +40,9 @@ private:
     video::EncoderConfig       m_config;
     uint32_t                   m_frameCount = 0;
     bool                       m_initialized = false;
-    float                      m_compressionQuality = 0.45f;
+    float                      m_compressionQuality = 0.50f;
     bool                       m_comInitialized = false;
+    std::vector<uint8_t>       m_bgrBuffer;
 };
 
 } // namespace client

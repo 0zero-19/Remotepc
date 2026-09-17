@@ -59,16 +59,22 @@ void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
     QImage img;
     if (img.loadFromData(frameData, static_cast<int>(size), "JPEG") ||
         img.loadFromData(frameData, static_cast<int>(size))) {
-        QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
-            m_screenLabel->size(),
-            Qt::KeepAspectRatio,
-            Qt::FastTransformation
-        );
-        m_screenLabel->setPixmap(pixmap);
-        m_screenLabel->setText("");
+        updateImage(img, width, height);
     } else {
         m_screenLabel->setText(QString("📺 %1x%2").arg(width).arg(height));
     }
+}
+
+void StudentTile::updateImage(const QImage& img, uint16_t /*width*/, uint16_t /*height*/) {
+    if (img.isNull()) return;
+
+    m_currentFrame = QPixmap::fromImage(img).scaled(
+        m_screenLabel->size(),
+        Qt::KeepAspectRatio,
+        Qt::FastTransformation
+    );
+    m_screenLabel->setPixmap(m_currentFrame);
+    m_screenLabel->setText("");
 }
 
 void StudentTile::setStudentName(const QString& name) {

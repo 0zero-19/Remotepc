@@ -32,6 +32,7 @@ public:
 public slots:
     /// Обновить изображение экрана
     void updateFrame(const QByteArray& frameData, uint16_t width, uint16_t height);
+    void updateImage(const QImage& img, uint16_t width, uint16_t height);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;

@@ -302,17 +302,6 @@ void MainWindow::setupNetwork() {
         return;
     }
 
-    m_udpSocket = new QUdpSocket(this);
-    if (!m_udpSocket->bind(QHostAddress::Any, net::VIDEO_PORT)) {
-        QMessageBox::critical(this, "Ошибка",
-            QString("Не удалось привязать UDP сокет к порту %1")
-                .arg(net::VIDEO_PORT));
-        return;
-    }
-
-    connect(m_udpSocket, &QUdpSocket::readyRead,
-            this, &MainWindow::onVideoDataReady);
-
     setStatusText("Ожидание подключения...");
 }
 
@@ -353,24 +342,29 @@ void MainWindow::onNewConnection() {
         });
 
         connect(session, &ClientSession::videoFrameReceived, this, [this, tile, clientId](uint32_t, const QByteArray& frameData, uint16_t w, uint16_t h) {
-            tile->updateFrame(reinterpret_cast<const uint8_t*>(frameData.constData()), frameData.size(), w, h);
+            if (frameData.isEmpty()) return;
+
+            // Декодируем JPEG ровно один раз для всех компонентов
+            QImage img;
+            if (!img.loadFromData(frameData, "JPEG") && !img.loadFromData(frameData)) {
+                return;
+            }
+
+            tile->updateImage(img, w, h);
 
             if (m_activeClientId == clientId) {
-                QImage img;
-                if (img.loadFromData(frameData, "JPEG") || img.loadFromData(frameData)) {
-                    m_lastSingleImage = img;
-                    QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
-                        m_singleScreenLabel->size(),
-                        Qt::KeepAspectRatio,
-                        Qt::FastTransformation
-                    );
-                    m_singleScreenLabel->setPixmap(pixmap);
-                    m_singleScreenLabel->setText("");
-                }
+                m_lastSingleImage = img;
+                QPixmap pixmap = QPixmap::fromImage(img).scaled(
+                    m_singleScreenLabel->size(),
+                    Qt::KeepAspectRatio,
+                    Qt::FastTransformation
+                );
+                m_singleScreenLabel->setPixmap(pixmap);
+                m_singleScreenLabel->setText("");
             }
 
             if (auto* dlg = m_viewDialogs.value(clientId, nullptr)) {
-                dlg->updateFrame(frameData, w, h);
+                dlg->updateImage(img, w, h);
             }
         });
 
@@ -383,59 +377,7 @@ void MainWindow::onNewConnection() {
 }
 
 void MainWindow::onVideoDataReady() {
-    while (m_udpSocket->hasPendingDatagrams()) {
-        QByteArray datagram;
-        datagram.resize(m_udpSocket->pendingDatagramSize());
-        m_udpSocket->readDatagram(datagram.data(), datagram.size());
-
-        PacketHeader header;
-        if (!parseHeader(reinterpret_cast<const uint8_t*>(datagram.constData()),
-                         datagram.size(), header)) {
-            continue;
-        }
-
-        if (static_cast<PacketType>(header.type) != PacketType::VIDEO_FRAME) {
-            continue;
-        }
-
-        if (datagram.size() < static_cast<int>(sizeof(PacketHeader) + sizeof(VideoFrameHeader))) {
-            continue;
-        }
-
-        VideoFrameHeader frameHeader;
-        std::memcpy(&frameHeader,
-                     datagram.constData() + sizeof(PacketHeader),
-                     sizeof(VideoFrameHeader));
-
-        const uint8_t* frameData = reinterpret_cast<const uint8_t*>(
-            datagram.constData() + sizeof(PacketHeader) + sizeof(VideoFrameHeader));
-        size_t frameSize = datagram.size() - sizeof(PacketHeader) - sizeof(VideoFrameHeader);
-
-        auto tileIt = m_tiles.find(frameHeader.clientId);
-        if (tileIt != m_tiles.end()) {
-            tileIt.value()->updateFrame(frameData, frameSize, frameHeader.width, frameHeader.height);
-        }
-
-        if (m_activeClientId == frameHeader.clientId) {
-            QImage img;
-            if (img.loadFromData(frameData, static_cast<int>(frameSize), "JPEG") ||
-                img.loadFromData(frameData, static_cast<int>(frameSize))) {
-                m_lastSingleImage = img;
-                QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
-                    m_singleScreenLabel->size(),
-                    Qt::KeepAspectRatio,
-                    Qt::FastTransformation
-                );
-                m_singleScreenLabel->setPixmap(pixmap);
-                m_singleScreenLabel->setText("");
-            }
-        }
-
-        if (auto* dlg = m_viewDialogs.value(frameHeader.clientId, nullptr)) {
-            QByteArray dataCopy(reinterpret_cast<const char*>(frameData), static_cast<int>(frameSize));
-            dlg->updateFrame(dataCopy, frameHeader.width, frameHeader.height);
-        }
-    }
+    // Резервный слот (видеопоток передается надёжно по TCP с TCP_NODELAY)
 }
 
 void MainWindow::onClientDisconnected(uint32_t clientId) {

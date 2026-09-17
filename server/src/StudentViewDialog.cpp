@@ -108,21 +108,27 @@ void StudentViewDialog::setupUi() {
 void StudentViewDialog::updateFrame(const QByteArray& frameData, uint16_t width, uint16_t height) {
     if (frameData.isEmpty()) return;
 
-    m_origWidth = width;
-    m_origHeight = height;
-
     QImage img;
     if (img.loadFromData(frameData, "JPEG") || img.loadFromData(frameData)) {
-        m_lastImage = img;
-        // FastTransformation для лайв-видео — билинейный фильтр вместо бикубического,
-        // существенно быстрее при 30+ кадрах в секунду
-        QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
-            m_videoLabel->size(),
-            Qt::KeepAspectRatio,
-            Qt::FastTransformation
-        );
-        m_videoLabel->setPixmap(pixmap);
+        updateImage(img, width, height);
     }
+}
+
+void StudentViewDialog::updateImage(const QImage& img, uint16_t width, uint16_t height) {
+    if (img.isNull()) return;
+
+    m_origWidth = width;
+    m_origHeight = height;
+    m_lastImage = img;
+
+    // FastTransformation для лайв-видео — билинейный фильтр вместо бикубического,
+    // существенно быстрее при 45+ кадрах в секунду
+    QPixmap pixmap = QPixmap::fromImage(img).scaled(
+        m_videoLabel->size(),
+        Qt::KeepAspectRatio,
+        Qt::FastTransformation
+    );
+    m_videoLabel->setPixmap(pixmap);
 }
 
 void StudentViewDialog::resizeEvent(QResizeEvent* event) {

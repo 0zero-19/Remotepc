@@ -22,6 +22,7 @@ public:
     ~StudentTile() override = default;
 
     void updateFrame(const uint8_t* frameData, size_t size, uint16_t width, uint16_t height);
+    void updateImage(const QImage& img, uint16_t width, uint16_t height);
     void setStudentName(const QString& name);
     QString studentName() const { return m_studentName; }
 
