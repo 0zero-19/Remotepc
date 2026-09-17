@@ -29,8 +29,10 @@ void InputInjector::moveMouse(float normalizedX, float normalizedY) {
     normalizedX = (normalizedX < 0.0f) ? 0.0f : (normalizedX > 1.0f) ? 1.0f : normalizedX;
     normalizedY = (normalizedY < 0.0f) ? 0.0f : (normalizedY > 1.0f) ? 1.0f : normalizedY;
 
-    m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
-    m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    if (m_screenWidth <= 0 || m_screenHeight <= 0) {
+        m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+        m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    }
     int screenW = (m_screenWidth > 0) ? m_screenWidth : 1920;
     int screenH = (m_screenHeight > 0) ? m_screenHeight : 1080;
 
@@ -58,8 +60,10 @@ void InputInjector::clickMouse(float normalizedX, float normalizedY,
     normalizedX = (normalizedX < 0.0f) ? 0.0f : (normalizedX > 1.0f) ? 1.0f : normalizedX;
     normalizedY = (normalizedY < 0.0f) ? 0.0f : (normalizedY > 1.0f) ? 1.0f : normalizedY;
 
-    m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
-    m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    if (m_screenWidth <= 0 || m_screenHeight <= 0) {
+        m_screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+        m_screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    }
     int screenW = (m_screenWidth > 0) ? m_screenWidth : 1920;
     int screenH = (m_screenHeight > 0) ? m_screenHeight : 1080;
 

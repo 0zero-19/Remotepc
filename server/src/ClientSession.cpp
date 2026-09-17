@@ -16,6 +16,13 @@ ClientSession::ClientSession(uint32_t clientId, QTcpSocket* socket, QObject* par
     , m_socket(socket)
     , m_lastHeartbeat(std::chrono::steady_clock::now())
 {
+    if (m_socket) {
+        m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+        m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
+        m_socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 2 * 1024 * 1024);
+        m_socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 2 * 1024 * 1024);
+    }
+
     connect(m_socket, &QTcpSocket::readyRead, this, &ClientSession::onDataReady);
     connect(m_socket, &QTcpSocket::disconnected, this, &ClientSession::onDisconnected);
     connect(m_socket, &QAbstractSocket::errorOccurred, this, &ClientSession::onError);

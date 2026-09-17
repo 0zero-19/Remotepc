@@ -359,10 +359,10 @@ void MainWindow::onNewConnection() {
                 QImage img;
                 if (img.loadFromData(frameData, "JPEG") || img.loadFromData(frameData)) {
                     m_lastSingleImage = img;
-                    QPixmap pixmap = QPixmap::fromImage(img).scaled(
+                    QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
                         m_singleScreenLabel->size(),
                         Qt::KeepAspectRatio,
-                        Qt::SmoothTransformation
+                        Qt::FastTransformation
                     );
                     m_singleScreenLabel->setPixmap(pixmap);
                     m_singleScreenLabel->setText("");
@@ -421,10 +421,10 @@ void MainWindow::onVideoDataReady() {
             if (img.loadFromData(frameData, static_cast<int>(frameSize), "JPEG") ||
                 img.loadFromData(frameData, static_cast<int>(frameSize))) {
                 m_lastSingleImage = img;
-                QPixmap pixmap = QPixmap::fromImage(img).scaled(
+                QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
                     m_singleScreenLabel->size(),
                     Qt::KeepAspectRatio,
-                    Qt::SmoothTransformation
+                    Qt::FastTransformation
                 );
                 m_singleScreenLabel->setPixmap(pixmap);
                 m_singleScreenLabel->setText("");
@@ -517,7 +517,7 @@ void MainWindow::onClientSelected(uint32_t clientId) {
         QPixmap pixmap = tile->currentPixmap().scaled(
             m_singleScreenLabel->size(),
             Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
+            Qt::FastTransformation
         );
         m_singleScreenLabel->setPixmap(pixmap);
         m_singleScreenLabel->setText("");
@@ -801,7 +801,7 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
         QPixmap pixmap = QPixmap::fromImage(m_lastSingleImage).scaled(
             m_singleScreenLabel->size(),
             Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
+            Qt::FastTransformation
         );
         m_singleScreenLabel->setPixmap(pixmap);
     }
@@ -890,9 +890,27 @@ void MainWindow::sendRemoteMouse(QMouseEvent* event, uint8_t action) {
     float normX = static_cast<float>(normPos.x());
     float normY = static_cast<float>(normPos.y());
 
-    if (action == 0) {
+    if (action == 0) { // MouseMove
+        auto now = std::chrono::steady_clock::now();
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_lastMouseMoveTime).count();
+
+        // Ограничиваем частоту отправки движения мыши ~60 Гц (раз в 15 мс)
+        // либо если курсор сдвинулся значительно, чтобы не перегружать сеть и TCP сокет
+        float dx = std::abs(normX - static_cast<float>(m_lastNormPos.x()));
+        float dy = std::abs(normY - static_cast<float>(m_lastNormPos.y()));
+
+        if (elapsedMs < 15 && (dx < 0.003f && dy < 0.003f)) {
+            return;
+        }
+
+        m_lastMouseMoveTime = now;
+        m_lastNormPos = QPointF(normX, normY);
         session->sendMouseMove(normX, normY);
     } else {
+        m_lastMouseMoveTime = std::chrono::steady_clock::now();
+        m_lastNormPos = QPointF(normX, normY);
+
         uint8_t btn = 0; // 0=left, 1=right, 2=middle
         if (event->button() == Qt::RightButton) btn = 1;
         else if (event->button() == Qt::MiddleButton) btn = 2;

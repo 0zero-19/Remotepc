@@ -139,11 +139,11 @@ bool ScreenCapturer::captureFrame(video::RawFrame& outFrame) {
 bool ScreenCapturer::captureFrameDXGI(video::RawFrame& outFrame) {
     if (!m_duplication) return false;
 
-    // Получаем следующий кадр (таймаут 16 мс — минимум для ~60 FPS отзывчивости)
+    // Получаем следующий кадр (таймаут 8 мс для плавной работы при 45-60 FPS)
     ComPtr<IDXGIResource> desktopResource;
     DXGI_OUTDUPL_FRAME_INFO frameInfo;
 
-    HRESULT hr = m_duplication->AcquireNextFrame(16, &frameInfo, desktopResource.GetAddressOf());
+    HRESULT hr = m_duplication->AcquireNextFrame(8, &frameInfo, desktopResource.GetAddressOf());
 
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
         return false;  // Нет изменений на экране

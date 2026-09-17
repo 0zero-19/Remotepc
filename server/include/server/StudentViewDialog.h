@@ -15,6 +15,7 @@
 #include <QKeyEvent>
 #include <QWheelEvent>
 #include <QPointF>
+#include <chrono>
 
 #include "server/ClientSession.h"
 
@@ -63,6 +64,8 @@ private:
     QImage         m_lastImage;
     uint16_t       m_origWidth = 1920;
     uint16_t       m_origHeight = 1080;
+    std::chrono::steady_clock::time_point m_lastMouseMoveTime{};
+    QPointF        m_lastNormPos{-1.0, -1.0};
 };
 
 } // namespace server

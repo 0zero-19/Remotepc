@@ -320,7 +320,7 @@ LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 SetForegroundWindow(hwnd);
 
                 HMENU hMenu = CreatePopupMenu();
-                AppendMenuW(hMenu, MF_STRING | MF_GRAYED, IDM_TRAY_TITLE, L"💻 ClassroomMonitor — Агент (30 FPS)");
+                AppendMenuW(hMenu, MF_STRING | MF_GRAYED, IDM_TRAY_TITLE, L"💻 ClassroomMonitor — Агент (45 FPS)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
                 AppendMenuW(hMenu, MF_STRING, IDM_TRAY_LOG, L"📄 Открыть журнал (log_run.txt)");
                 AppendMenuW(hMenu, MF_STRING, IDM_TRAY_CONSOLE,
@@ -417,7 +417,7 @@ void trayThreadFunc() {
 }
 
 // =============================================================================
-// Отправка видеопотока (30 FPS)
+// Sending video stream (45 FPS)
 // =============================================================================
 
 void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& serverAddr,
@@ -595,14 +595,16 @@ void commandThread(SOCKET tcpSocket, InputInjector& injector, LockManager& lockM
                     break;
             }
 
-            // Отправляем ACK
-            AckPayload ack;
-            ack.ackedSequence = header.sequence;
-            ack.ackedType     = header.type;
-            ack.statusCode    = 0;
-            auto ackPacket = makePacket(PacketType::ACK, ack, g_sequence.fetch_add(1));
-            send(tcpSocket, reinterpret_cast<const char*>(ackPacket.data()),
-                 static_cast<int>(ackPacket.size()), 0);
+            // Отправляем ACK (только для команд состояния, не отправляем для частого mouse move)
+            if (type != PacketType::MOUSE_MOVE) {
+                AckPayload ack;
+                ack.ackedSequence = header.sequence;
+                ack.ackedType     = header.type;
+                ack.statusCode    = 0;
+                auto ackPacket = makePacket(PacketType::ACK, ack, g_sequence.fetch_add(1));
+                send(tcpSocket, reinterpret_cast<const char*>(ackPacket.data()),
+                     static_cast<int>(ackPacket.size()), 0);
+            }
 
             accumBuffer.erase(accumBuffer.begin(), accumBuffer.begin() + totalPacketSize);
         }
@@ -673,7 +675,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     }
 
     net::AgentConfig config;
-    config.targetFps = 30;
+    config.targetFps = 45;
 
     // 1. Проверяем аргументы командной строки на наличие IP
     std::string cmdArg = trimString(cmdLineStr);
@@ -716,6 +718,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         // Без этого TCP может буферизировать маленькие пакеты до 200мс
         BOOL tcpNoDelay = TRUE;
         setsockopt(tcpSocket, IPPROTO_TCP, TCP_NODELAY, (const char*)&tcpNoDelay, sizeof(tcpNoDelay));
+
+        int sockBufSize = 2 * 1024 * 1024; // 2 МБ буфер отправки/приёма
+        setsockopt(tcpSocket, SOL_SOCKET, SO_SNDBUF, (const char*)&sockBufSize, sizeof(sockBufSize));
+        setsockopt(tcpSocket, SOL_SOCKET, SO_RCVBUF, (const char*)&sockBufSize, sizeof(sockBufSize));
 
         sockaddr_in serverAddr = {};
         serverAddr.sin_family = AF_INET;
@@ -794,7 +800,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         std::thread cmdThread(commandThread, tcpSocket, std::ref(injector), std::ref(lockMgr));
         std::thread hbThread(heartbeatThread, tcpSocket);
 
-        logMessage("[Agent] Стриминг экрана (30 FPS) и приём команд активны");
+        logMessage("[Agent] Стриминг экрана (45 FPS) и приём команд активны");
 
         // Ждём пока работает агент
         while (g_running.load()) {

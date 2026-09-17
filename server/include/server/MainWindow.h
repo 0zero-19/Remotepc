@@ -20,6 +20,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QPointF>
+#include <chrono>
 
 #include "server/ClientSession.h"
 #include "server/StudentTile.h"
@@ -126,6 +127,8 @@ private:
     // Состояние управления
     bool     m_controlEnabled = false;
     QImage   m_lastSingleImage;
+    std::chrono::steady_clock::time_point m_lastMouseMoveTime{};
+    QPointF  m_lastNormPos{-1.0, -1.0};
 };
 
 } // namespace server

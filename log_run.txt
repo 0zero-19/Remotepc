@@ -93,3 +93,29 @@
 [2026-09-17 10:47:12] [DEBUG] [Teacher]     ClassroomMonitor — Панель Преподавателя
 [2026-09-17 10:47:12] [DEBUG] [Teacher]     Сборка: Sep 17 2026 10:46:05
 [2026-09-17 10:47:12] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:51:49] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:51:49] [DEBUG] [Teacher]     ClassroomMonitor — Панель Преподавателя
+[2026-09-17 10:51:49] [DEBUG] [Teacher]     Сборка: Sep 17 2026 10:51:39
+[2026-09-17 10:51:49] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:52:01] [DEBUG] [Teacher] [Session] 1 HANDSHAKE: "FAKER" "Mechatronics" 1920 x 1080
+[2026-09-17 10:52:38] [DEBUG] [Teacher] [Session] 1 disconnected
+[2026-09-17 10:52:38] [FATAL] [Teacher] ASSERT failure in cm::server::MainWindow: "Called object is not of the correct type (class destructor may have already run)", file C:\Qt\6.7.2\msvc2019_64\include\QtCore/qobjectdefs_impl.h, line 130
+[2026-09-17 10:53:17] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:53:17] [DEBUG] [Teacher]     ClassroomMonitor — Панель Преподавателя
+[2026-09-17 10:53:17] [DEBUG] [Teacher]     Сборка: Sep 17 2026 10:51:39
+[2026-09-17 10:53:17] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:53:28] [DEBUG] [Teacher] [Session] 1 HANDSHAKE: "FAKER" "Mechatronics" 1920 x 1080
+[2026-09-17 10:54:28] [DEBUG] [Teacher] [Session] 1 disconnected
+[2026-09-17 10:54:28] [FATAL] [Teacher] ASSERT failure in cm::server::MainWindow: "Called object is not of the correct type (class destructor may have already run)", file C:\Qt\6.7.2\msvc2019_64\include\QtCore/qobjectdefs_impl.h, line 130
+[2026-09-17 10:54:44] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:54:44] [DEBUG] [Teacher]     ClassroomMonitor — Панель Преподавателя
+[2026-09-17 10:54:44] [DEBUG] [Teacher]     Сборка: Sep 17 2026 10:51:39
+[2026-09-17 10:54:44] [DEBUG] [Teacher] =====================================================
+[2026-09-17 10:54:59] [DEBUG] [Teacher] [Session] 1 HANDSHAKE: "FAKER" "Mechatronics" 1920 x 1080
+[2026-09-17 10:56:41] [DEBUG] [Teacher] [Session] 1 disconnected
+[2026-09-17 10:56:41] [FATAL] [Teacher] ASSERT failure in cm::server::MainWindow: "Called object is not of the correct type (class destructor may have already run)", file C:\Qt\6.7.2\msvc2019_64\include\QtCore/qobjectdefs_impl.h, line 130
+[2026-09-17 10:56:42] [FATAL] [Teacher] ASSERT failure in cm::server::MainWindow: "Called object is not of the correct type (class destructor may have already run)", file C:\Qt\6.7.2\msvc2019_64\include\QtCore/qobjectdefs_impl.h, line 130
+[2026-09-17 11:06:42] [DEBUG] [Teacher] =====================================================
+[2026-09-17 11:06:42] [DEBUG] [Teacher]     ClassroomMonitor — Панель Преподавателя
+[2026-09-17 11:06:42] [DEBUG] [Teacher]     Сборка: Sep 17 2026 11:04:57
+[2026-09-17 11:06:42] [DEBUG] [Teacher] =====================================================

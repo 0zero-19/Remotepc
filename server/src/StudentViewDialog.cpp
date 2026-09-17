@@ -131,7 +131,7 @@ void StudentViewDialog::resizeEvent(QResizeEvent* event) {
         QPixmap pixmap = QPixmap::fromImage(m_lastImage).scaled(
             m_videoLabel->size(),
             Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
+            Qt::FastTransformation
         );
         m_videoLabel->setPixmap(pixmap);
     }
@@ -252,9 +252,25 @@ void StudentViewDialog::sendRemoteMouse(QMouseEvent* event, uint8_t action) {
     float normX = static_cast<float>(normPos.x());
     float normY = static_cast<float>(normPos.y());
 
-    if (action == 0) {
+    if (action == 0) { // MouseMove
+        auto now = std::chrono::steady_clock::now();
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_lastMouseMoveTime).count();
+
+        float dx = std::abs(normX - static_cast<float>(m_lastNormPos.x()));
+        float dy = std::abs(normY - static_cast<float>(m_lastNormPos.y()));
+
+        if (elapsedMs < 15 && (dx < 0.003f && dy < 0.003f)) {
+            return;
+        }
+
+        m_lastMouseMoveTime = now;
+        m_lastNormPos = QPointF(normX, normY);
         m_session->sendMouseMove(normX, normY);
     } else {
+        m_lastMouseMoveTime = std::chrono::steady_clock::now();
+        m_lastNormPos = QPointF(normX, normY);
+
         uint8_t btn = 0; // 0=left, 1=right, 2=middle
         if (event->button() == Qt::RightButton) btn = 1;
         else if (event->button() == Qt::MiddleButton) btn = 2;
