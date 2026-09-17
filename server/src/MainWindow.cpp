@@ -572,7 +572,7 @@ void MainWindow::onMessageClicked() {
 
     MessageDialog dlg(this);
     connect(&dlg, &MessageDialog::messageSent, this, [this, ids](const QString& text) {
-        // Уведомление отправлено
+        (void)text;
         setStatusText(QString("Сообщение отправлено (%1 ПК)").arg(ids.size()));
     });
     dlg.exec();

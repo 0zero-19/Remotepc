@@ -7,9 +7,7 @@
 
 #include <QApplication>
 #include <QStyleFactory>
-<<<<<<< HEAD
 #include <QFont>
-=======
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -37,7 +35,7 @@ void customLogMessageHandler(QtMsgType type, const QMessageLogContext& /*context
 
     QString logLine = QString("[%1] [%2] [Teacher] %3\n").arg(timeStr, typeStr, msg);
 
-    // Запись в файл log_run.txt
+    // Write to log_run.txt
     QFile logFile("log_run.txt");
     if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         QTextStream stream(&logFile);
@@ -45,12 +43,11 @@ void customLogMessageHandler(QtMsgType type, const QMessageLogContext& /*context
         logFile.close();
     }
 
-    // Если включена консоль — дублируем вывод в неё
+    // Duplicate to console if enabled
     if (g_hasConsole) {
         std::wcout << logLine.toStdWString();
     }
 }
->>>>>>> refs/remotes/origin/main
 
 int main(int argc, char* argv[]) {
     // Проверяем флаг запуска консоли (--console или наличие файла show_console.txt)
