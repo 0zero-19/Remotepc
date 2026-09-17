@@ -40,7 +40,7 @@ private:
     video::EncoderConfig       m_config;
     uint32_t                   m_frameCount = 0;
     bool                       m_initialized = false;
-    float                      m_compressionQuality = 0.65f;
+    float                      m_compressionQuality = 0.45f;
     bool                       m_comInitialized = false;
 };
 

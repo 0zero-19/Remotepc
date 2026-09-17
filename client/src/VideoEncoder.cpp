@@ -57,8 +57,8 @@ bool VideoEncoder::initialize(const video::EncoderConfig& config) {
         return false;
     }
 
-    // Базовое качество JPEG: 65% для оптимального баланса качества и скорости передачи
-    m_compressionQuality = 0.65f;
+    // Качество JPEG: 45% для быстрого стриминга (меньше байт = меньше задержки)
+    m_compressionQuality = 0.45f;
     m_frameCount = 0;
     m_initialized = true;
 

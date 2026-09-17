@@ -52,6 +52,9 @@ qrc_*.cpp
 *.sdf
 *.opensdf
 
+# --- AI/Agent tools ---
+.agents/
+
 # --- OS ---
 Thumbs.db
 Desktop.ini
@@ -65,3 +68,7 @@ Desktop.ini
 # --- Dependencies (if vendored) ---
 external/
 vcpkg_installed/
+
+# --- Logs ---
+*.log
+log_run.txt

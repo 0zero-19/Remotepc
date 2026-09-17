@@ -76,10 +76,10 @@ void StudentTile::updateFrame(const uint8_t* frameData, size_t size,
     QImage img;
     if (img.loadFromData(frameData, static_cast<int>(size), "JPEG") ||
         img.loadFromData(frameData, static_cast<int>(size))) {
-        QPixmap pixmap = QPixmap::fromImage(img).scaled(
+        QPixmap pixmap = QPixmap::fromImage(std::move(img)).scaled(
             m_screenLabel->size(),
             Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
+            Qt::FastTransformation
         );
         m_screenLabel->setPixmap(pixmap);
         m_screenLabel->setStyleSheet(

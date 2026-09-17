@@ -447,7 +447,7 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
        << " @ " << encConfig.fps << " FPS";
     logMessage(ss.str());
 
-    auto frameInterval = std::chrono::milliseconds(1000 / config.targetFps);
+    auto frameIntervalUs = std::chrono::microseconds(1000000 / config.targetFps);
 
     while (g_running.load()) {
         auto frameStart = std::chrono::steady_clock::now();
@@ -474,13 +474,13 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
                     g_sequence.fetch_add(1)
                 );
 
-                // 1. Отправляем кадр по TCP (надёжная доставка)
+                // Отправляем кадр по TCP (надёжная доставка)
                 send(tcpSocket,
                      reinterpret_cast<const char*>(packet.data()),
                      static_cast<int>(packet.size()),
                      0);
 
-                // 2. Также отправляем по UDP если кадр умещается в UDP датаграмму
+                // Также дублируем по UDP для минимальной задержки (если кадр маленький)
                 if (packet.size() <= net::MAX_UDP_PACKET_SIZE) {
                     sendto(udpSocket,
                            reinterpret_cast<const char*>(packet.data()),
@@ -492,11 +492,11 @@ void videoStreamThread(SOCKET tcpSocket, SOCKET udpSocket, const sockaddr_in& se
             }
         }
 
-        // Ограничиваем FPS
-        auto frameEnd = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart);
-        if (elapsed < frameInterval) {
-            std::this_thread::sleep_for(frameInterval - elapsed);
+        // Точное ограничение FPS с использованием yield вместо sleep
+        // (Windows sleep может спать на 15мс дольше заданного)
+        auto targetEnd = frameStart + frameIntervalUs;
+        while (std::chrono::steady_clock::now() < targetEnd) {
+            std::this_thread::yield();
         }
     }
 
@@ -711,6 +711,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         DWORD timeout = net::TCP_CONNECT_TIMEOUT_MS;
         setsockopt(tcpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
         setsockopt(tcpSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+        // Отключаем Nagle's algorithm — критично для стриминга в реальном времени
+        // Без этого TCP может буферизировать маленькие пакеты до 200мс
+        BOOL tcpNoDelay = TRUE;
+        setsockopt(tcpSocket, IPPROTO_TCP, TCP_NODELAY, (const char*)&tcpNoDelay, sizeof(tcpNoDelay));
 
         sockaddr_in serverAddr = {};
         serverAddr.sin_family = AF_INET;
