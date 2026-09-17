@@ -298,7 +298,31 @@ QString ThemeManager::generateStyleSheet(const QString& themeName) const {
             background-color: %11;
         }
 
-        /* Второстепенные кнопки (Сообщение, Скриншот, Во весь экран) */
+        /* Кнопка Управление */
+        QPushButton#controlButton {
+            height: 36px;
+            padding: 0 14px;
+            background-color: %5;
+            border: 1px solid %4;
+            border-radius: 5px;
+            color: %1;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        QPushButton#controlButton:hover {
+            background-color: %7;
+        }
+        QPushButton#controlButton[active="true"] {
+            background-color: %8;
+            border: 1px solid %11;
+            color: #ffffff;
+            font-weight: bold;
+        }
+        QPushButton#controlButton[active="true"]:hover {
+            background-color: %11;
+        }
+
+        /* Второстепенные кнопки (Скриншот, Во весь экран) */
         QPushButton.secondaryButton {
             height: 36px;
             padding: 0 12px;

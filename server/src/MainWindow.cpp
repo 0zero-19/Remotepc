@@ -20,6 +20,7 @@
 #include <QFileDialog>
 #include <QDateTime>
 #include <QKeyEvent>
+#include <QResizeEvent>
 #include <QStyle>
 #include <QDebug>
 
@@ -131,7 +132,36 @@ void MainWindow::setupUi() {
     m_singleScreenLabel->setAlignment(Qt::AlignCenter);
     m_singleScreenLabel->setStyleSheet("color: #a89984; font-size: 14px;");
     m_singleScreenLabel->setText("🖥️ Экран ПК\nЗдесь будет трансляция экрана ученика");
+    m_singleScreenLabel->setMouseTracking(true);
+    m_singleScreenLabel->setFocusPolicy(Qt::StrongFocus);
+    m_singleScreenLabel->installEventFilter(this);
     singleLayout->addWidget(m_singleScreenLabel);
+
+    // Плавающий бейдж активного управления
+    m_controlBanner = new QWidget(m_singleScreenWidget);
+    m_controlBanner->setStyleSheet(
+        "background-color: rgba(20, 83, 45, 0.94);"
+        "border: 1px solid #22c55e;"
+        "border-radius: 6px;"
+    );
+    auto* bannerLayout = new QHBoxLayout(m_controlBanner);
+    bannerLayout->setContentsMargins(12, 6, 12, 6);
+    bannerLayout->setSpacing(10);
+
+    m_controlBannerText = new QLabel("🟢 Управление активно — мышь перехвачена (Esc для выхода)", m_controlBanner);
+    m_controlBannerText->setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px; background: transparent;");
+    bannerLayout->addWidget(m_controlBannerText);
+
+    auto* stopControlBtn = new QPushButton("✖ Отключить", m_controlBanner);
+    stopControlBtn->setStyleSheet(
+        "QPushButton { background-color: #dc2626; color: #ffffff; border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #ef4444; }"
+    );
+    stopControlBtn->setCursor(Qt::PointingHandCursor);
+    connect(stopControlBtn, &QPushButton::clicked, this, &MainWindow::onToggleControl);
+    bannerLayout->addWidget(stopControlBtn);
+
+    m_controlBanner->hide();
 
     // Оверлей блокировки (по центру)
     m_lockOverlay = new QWidget(m_singleScreenWidget);
@@ -197,11 +227,14 @@ void MainWindow::setupUi() {
     sep->setStyleSheet("color: " + ThemeManager::instance().currentTheme().border + ";");
     controlLayout->addWidget(sep);
 
-    m_messageBtn = new QPushButton("Сообщение", controlBar);
-    m_messageBtn->setProperty("class", "secondaryButton");
-    m_messageBtn->setCursor(Qt::PointingHandCursor);
-    connect(m_messageBtn, &QPushButton::clicked, this, &MainWindow::onMessageClicked);
-    controlLayout->addWidget(m_messageBtn);
+    m_controlBtn = new QPushButton("🖱️ Управление", controlBar);
+    m_controlBtn->setObjectName("controlButton");
+    m_controlBtn->setProperty("class", "secondaryButton");
+    m_controlBtn->setProperty("active", false);
+    m_controlBtn->setCursor(Qt::PointingHandCursor);
+    m_controlBtn->setToolTip("Перехватить управление мышью (Горячая клавиша: C / Esc)");
+    connect(m_controlBtn, &QPushButton::clicked, this, &MainWindow::onToggleControl);
+    controlLayout->addWidget(m_controlBtn);
 
     m_screenshotBtn = new QPushButton("Скриншот", controlBar);
     m_screenshotBtn->setProperty("class", "secondaryButton");
@@ -325,6 +358,7 @@ void MainWindow::onNewConnection() {
             if (m_activeClientId == clientId) {
                 QImage img;
                 if (img.loadFromData(frameData, "JPEG") || img.loadFromData(frameData)) {
+                    m_lastSingleImage = img;
                     QPixmap pixmap = QPixmap::fromImage(img).scaled(
                         m_singleScreenLabel->size(),
                         Qt::KeepAspectRatio,
@@ -386,6 +420,7 @@ void MainWindow::onVideoDataReady() {
             QImage img;
             if (img.loadFromData(frameData, static_cast<int>(frameSize), "JPEG") ||
                 img.loadFromData(frameData, static_cast<int>(frameSize))) {
+                m_lastSingleImage = img;
                 QPixmap pixmap = QPixmap::fromImage(img).scaled(
                     m_singleScreenLabel->size(),
                     Qt::KeepAspectRatio,
@@ -419,12 +454,16 @@ void MainWindow::onClientDisconnected(uint32_t clientId) {
     m_sidebar->removeClient(clientId);
 
     if (m_activeClientId == clientId) {
+        if (m_controlEnabled) {
+            onToggleControl();
+        }
         m_activeClientId = m_sidebar->activeClientId();
         if (m_activeClientId != 0) {
             onClientSelected(m_activeClientId);
         } else {
             m_infoName->setText("Нет ПК");
             m_infoOnline->setText("Offline");
+            m_lastSingleImage = QImage();
             m_singleScreenLabel->setPixmap(QPixmap());
             m_singleScreenLabel->setText("🖥️ Экран ПК\nЗдесь будет трансляция экрана ученика");
         }
@@ -474,6 +513,7 @@ void MainWindow::onClientSelected(uint32_t clientId) {
     }
 
     if (!tile->currentPixmap().isNull()) {
+        m_lastSingleImage = tile->currentPixmap().toImage();
         QPixmap pixmap = tile->currentPixmap().scaled(
             m_singleScreenLabel->size(),
             Qt::KeepAspectRatio,
@@ -482,11 +522,19 @@ void MainWindow::onClientSelected(uint32_t clientId) {
         m_singleScreenLabel->setPixmap(pixmap);
         m_singleScreenLabel->setText("");
     } else {
+        m_lastSingleImage = QImage();
         m_singleScreenLabel->setPixmap(QPixmap());
         m_singleScreenLabel->setText(QString("Ожидание трансляции %1...").arg(name));
     }
 
-    setStatusText(QString("Просмотр %1").arg(name));
+    if (m_controlEnabled) {
+        if (m_controlBannerText) {
+            m_controlBannerText->setText(QString("🟢 Управление: %1 — мышь перехвачена (Esc для выхода)").arg(name));
+        }
+        setStatusText(QString("Перехват управления мышью: %1").arg(name), "unlocked");
+    } else {
+        setStatusText(QString("Просмотр %1").arg(name));
+    }
 }
 
 void MainWindow::onClientDoubleClicked(uint32_t clientId) {
@@ -528,6 +576,9 @@ void MainWindow::onLockClicked() {
     }
 
     if (ids.contains(m_activeClientId)) {
+        if (m_controlEnabled) {
+            onToggleControl();
+        }
         m_lockOverlay->setGeometry(m_singleScreenWidget->rect());
         m_lockOverlay->show();
     }
@@ -559,23 +610,63 @@ void MainWindow::onUnlockClicked() {
     setStatusText(ids.size() == 1 ? "ПК разблокирован" : "Все ПК разблокированы", "unlocked");
 }
 
-void MainWindow::onMessageClicked() {
-    auto ids = m_sidebar->checkedClientIds();
-    if (ids.isEmpty() && m_activeClientId != 0) {
-        ids.append(m_activeClientId);
-    }
-
-    if (ids.isEmpty()) {
-        setStatusText("Выберите ПК для отправки");
+void MainWindow::onToggleControl() {
+    if (m_activeClientId == 0 || !m_sessions.contains(m_activeClientId)) {
+        setStatusText("Выберите ПК для управления");
         return;
     }
 
-    MessageDialog dlg(this);
-    connect(&dlg, &MessageDialog::messageSent, this, [this, ids](const QString& text) {
-        (void)text;
-        setStatusText(QString("Сообщение отправлено (%1 ПК)").arg(ids.size()));
-    });
-    dlg.exec();
+    // Если экран был заблокирован оверлеем — разблокируем для управления
+    if (m_lockOverlay && m_lockOverlay->isVisible()) {
+        m_lockOverlay->hide();
+        if (auto* session = m_sessions.value(m_activeClientId, nullptr)) {
+            session->sendUnlock();
+        }
+    }
+
+    // Если в режиме сетки — переключаемся на одиночный просмотр
+    if (m_screenStack->currentIndex() != 0) {
+        onSetSingleView();
+    }
+
+    m_controlEnabled = !m_controlEnabled;
+
+    if (m_controlEnabled) {
+        m_controlBtn->setText("🟢 Управление: ВКЛ");
+        m_controlBtn->setProperty("active", true);
+        m_controlBtn->style()->unpolish(m_controlBtn);
+        m_controlBtn->style()->polish(m_controlBtn);
+
+        m_singleScreenLabel->setCursor(Qt::CrossCursor);
+        m_singleScreenLabel->setFocus();
+        setFocus();
+
+        QString name = m_infoName->text();
+        if (m_controlBannerText) {
+            m_controlBannerText->setText(QString("🟢 Управление: %1 — мышь перехвачена (Esc для выхода)").arg(name));
+        }
+        if (m_controlBanner) {
+            m_controlBanner->adjustSize();
+            int bx = (m_singleScreenWidget->width() - m_controlBanner->width()) / 2;
+            m_controlBanner->move(qMax(10, bx), 12);
+            m_controlBanner->show();
+            m_controlBanner->raise();
+        }
+
+        setStatusText(QString("Перехват управления мышью активен: %1").arg(name), "unlocked");
+    } else {
+        m_controlBtn->setText("🖱️ Управление");
+        m_controlBtn->setProperty("active", false);
+        m_controlBtn->style()->unpolish(m_controlBtn);
+        m_controlBtn->style()->polish(m_controlBtn);
+
+        m_singleScreenLabel->setCursor(Qt::ArrowCursor);
+        if (m_controlBanner) {
+            m_controlBanner->hide();
+        }
+
+        setStatusText("Управление мышью отключено");
+    }
 }
 
 void MainWindow::onScreenshotClicked() {
@@ -623,6 +714,9 @@ void MainWindow::onSetSingleView() {
 }
 
 void MainWindow::onSetGridView() {
+    if (m_controlEnabled) {
+        onToggleControl();
+    }
     m_screenStack->setCurrentIndex(1);
     m_singleViewBtn->setProperty("active", false);
     m_gridViewBtn->setProperty("active", true);
@@ -634,6 +728,21 @@ void MainWindow::onSetGridView() {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
+    if (m_controlEnabled && m_activeClientId != 0) {
+        if (event->key() == Qt::Key_Escape) {
+            onToggleControl();
+            return;
+        }
+        if (auto* session = m_sessions.value(m_activeClientId, nullptr)) {
+            uint16_t vk = static_cast<uint16_t>(event->nativeVirtualKey());
+            uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+            if (vk > 0) {
+                session->sendKeyPress(vk, scan, 0);
+                return;
+            }
+        }
+    }
+
     if (event->key() == Qt::Key_Escape) {
         if (isFullScreen()) {
             showNormal();
@@ -643,6 +752,10 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
     }
     if (event->key() == Qt::Key_F11) {
         onToggleFullscreen();
+        return;
+    }
+    if (event->key() == Qt::Key_C) {
+        onToggleControl();
         return;
     }
     if (event->key() == Qt::Key_L) {
@@ -657,11 +770,135 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
         onScreenshotClicked();
         return;
     }
-    if (event->key() == Qt::Key_M) {
-        onMessageClicked();
-        return;
-    }
     QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::keyReleaseEvent(QKeyEvent* event) {
+    if (m_controlEnabled && m_activeClientId != 0) {
+        if (auto* session = m_sessions.value(m_activeClientId, nullptr)) {
+            uint16_t vk = static_cast<uint16_t>(event->nativeVirtualKey());
+            uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+            if (vk > 0) {
+                session->sendKeyRelease(vk, scan, 0);
+                return;
+            }
+        }
+    }
+    QMainWindow::keyReleaseEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    if (m_lockOverlay && m_lockOverlay->isVisible() && m_singleScreenWidget) {
+        m_lockOverlay->setGeometry(m_singleScreenWidget->rect());
+    }
+    if (m_controlBanner && m_controlBanner->isVisible() && m_singleScreenWidget) {
+        int bx = (m_singleScreenWidget->width() - m_controlBanner->width()) / 2;
+        m_controlBanner->move(qMax(10, bx), 12);
+        m_controlBanner->raise();
+    }
+    if (!m_lastSingleImage.isNull() && m_screenStack && m_screenStack->currentIndex() == 0 && m_singleScreenLabel) {
+        QPixmap pixmap = QPixmap::fromImage(m_lastSingleImage).scaled(
+            m_singleScreenLabel->size(),
+            Qt::KeepAspectRatio,
+            Qt::SmoothTransformation
+        );
+        m_singleScreenLabel->setPixmap(pixmap);
+    }
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == m_singleScreenLabel && m_controlEnabled && m_activeClientId != 0) {
+        if (event->type() == QEvent::MouseMove) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            sendRemoteMouse(me, 0); // move
+            return true;
+        } else if (event->type() == QEvent::MouseButtonPress) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            m_singleScreenLabel->setFocus();
+            sendRemoteMouse(me, 1); // press
+            return true;
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            sendRemoteMouse(me, 2); // release
+            return true;
+        } else if (event->type() == QEvent::MouseButtonDblClick) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            sendRemoteMouse(me, 1); // press
+            sendRemoteMouse(me, 2); // release
+            return true;
+        } else if (event->type() == QEvent::Wheel) {
+            auto* we = static_cast<QWheelEvent*>(event);
+            QPointF normPos = mapToImageNormalized(we->position());
+            if (normPos.x() >= 0.0f) {
+                if (auto* session = m_sessions.value(m_activeClientId, nullptr)) {
+                    QPoint angleDelta = we->angleDelta();
+                    int16_t deltaX = static_cast<int16_t>(angleDelta.x() / 120);
+                    int16_t deltaY = static_cast<int16_t>(angleDelta.y() / 120);
+                    session->sendMouseScroll(
+                        static_cast<float>(normPos.x()),
+                        static_cast<float>(normPos.y()),
+                        deltaX, deltaY);
+                }
+            }
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
+
+QPointF MainWindow::mapToImageNormalized(QPointF localPos) {
+    if (m_lastSingleImage.isNull() || !m_singleScreenLabel || m_singleScreenLabel->width() == 0 || m_singleScreenLabel->height() == 0) {
+        return QPointF(-1.0, -1.0);
+    }
+
+    // Вычисляем реальную область масштабированного изображения внутри QLabel
+    QSize labelSize = m_singleScreenLabel->size();
+    QSize imgSize = m_lastSingleImage.size().scaled(labelSize, Qt::KeepAspectRatio);
+    int offsetX = (labelSize.width() - imgSize.width()) / 2;
+    int offsetY = (labelSize.height() - imgSize.height()) / 2;
+
+    float imgX = static_cast<float>(localPos.x() - offsetX);
+    float imgY = static_cast<float>(localPos.y() - offsetY);
+
+    if (imgSize.width() <= 0 || imgSize.height() <= 0) {
+        return QPointF(-1.0, -1.0);
+    }
+
+    // Проверяем попадание курсора в область изображения
+    if (imgX < 0.0f || imgX > imgSize.width() || imgY < 0.0f || imgY > imgSize.height()) {
+        return QPointF(-1.0, -1.0);
+    }
+
+    float normX = imgX / static_cast<float>(imgSize.width());
+    float normY = imgY / static_cast<float>(imgSize.height());
+
+    normX = qBound(0.0f, normX, 1.0f);
+    normY = qBound(0.0f, normY, 1.0f);
+
+    return QPointF(normX, normY);
+}
+
+void MainWindow::sendRemoteMouse(QMouseEvent* event, uint8_t action) {
+    if (!m_controlEnabled || m_activeClientId == 0) return;
+    auto* session = m_sessions.value(m_activeClientId, nullptr);
+    if (!session) return;
+
+    QPointF normPos = mapToImageNormalized(event->position());
+    if (normPos.x() < 0.0f) return;
+
+    float normX = static_cast<float>(normPos.x());
+    float normY = static_cast<float>(normPos.y());
+
+    if (action == 0) {
+        session->sendMouseMove(normX, normY);
+    } else {
+        uint8_t btn = 0; // 0=left, 1=right, 2=middle
+        if (event->button() == Qt::RightButton) btn = 1;
+        else if (event->button() == Qt::MiddleButton) btn = 2;
+
+        session->sendMouseClick(normX, normY, btn, action == 1 ? 0 : 1);
+    }
 }
 
 void MainWindow::setStatusText(const QString& text, const QString& statusClass) {

@@ -17,12 +17,15 @@
 #include <QLabel>
 #include <QPushButton>
 
+#include <QMouseEvent>
+#include <QWheelEvent>
+#include <QPointF>
+
 #include "server/ClientSession.h"
 #include "server/StudentTile.h"
 #include "server/ClientSidebar.h"
 #include "server/StudentViewDialog.h"
 #include "server/SettingsDialog.h"
-#include "server/MessageDialog.h"
 
 class QTcpServer;
 class QUdpSocket;
@@ -39,6 +42,9 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
     void onNewConnection();
@@ -51,7 +57,7 @@ private slots:
 
     void onLockClicked();
     void onUnlockClicked();
-    void onMessageClicked();
+    void onToggleControl();
     void onScreenshotClicked();
     void onToggleFullscreen();
     void onSettingsClicked();
@@ -66,6 +72,8 @@ private:
     void setupNetwork();
     void updateGrid();
     void setStatusText(const QString& text, const QString& statusClass = "");
+    void sendRemoteMouse(QMouseEvent* event, uint8_t action);
+    QPointF mapToImageNormalized(QPointF localPos);
 
     // Сеть
     QTcpServer*  m_tcpServer = nullptr;
@@ -91,6 +99,8 @@ private:
     QLabel*          m_singleScreenLabel = nullptr;
     QWidget*         m_lockOverlay = nullptr;
     QLabel*          m_connectionBadge = nullptr;
+    QWidget*         m_controlBanner = nullptr;
+    QLabel*          m_controlBannerText = nullptr;
 
     QWidget*         m_gridWidget = nullptr;
     QGridLayout*     m_gridLayout = nullptr;
@@ -98,7 +108,7 @@ private:
     // Control Bar
     QPushButton*     m_lockBtn = nullptr;
     QPushButton*     m_unlockBtn = nullptr;
-    QPushButton*     m_messageBtn = nullptr;
+    QPushButton*     m_controlBtn = nullptr;
     QPushButton*     m_screenshotBtn = nullptr;
     QPushButton*     m_fullscreenBtn = nullptr;
     QLabel*          m_statusLabel = nullptr;
@@ -112,6 +122,10 @@ private:
     uint32_t m_nextClientId = 1;
     uint32_t m_activeClientId = 0;
     QString  m_localIps;
+
+    // Состояние управления
+    bool     m_controlEnabled = false;
+    QImage   m_lastSingleImage;
 };
 
 } // namespace server
