@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QStyleFactory>
 #include <QFont>
+#include <QIcon>
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -84,6 +85,11 @@ int main(int argc, char* argv[]) {
     qDebug() << "=====================================================";
 
     QApplication app(argc, argv);
+
+    QIcon appIcon("icon.png");
+    if (!appIcon.isNull()) {
+        app.setWindowIcon(appIcon);
+    }
 
     // Шрифт Ubuntu как в HTML (или системный sans-serif при отсутствии)
     QFont appFont("Ubuntu", 10);

@@ -1,30 +1,21 @@
 @echo off
 setlocal
-echo ===================================================
-echo   ClassroomMonitor - Student Agent (Background Mode)
-echo ===================================================
+cd /d "%~dp0"
 
+:: 1. Если доступен тихий загрузчик VBS — запускаем через wscript и мгновенно закрываемся
+if exist "run_student.vbs" (
+    start "" wscript //nologo "%~dp0run_student.vbs" %*
+    exit /b 0
+)
+
+:: 2. Резервный быстрый запуск без задержки на пересборку
 set SERVER_IP=%1
-
 if "%SERVER_IP%"=="" (
     if exist "server_ip.txt" (
         set /p SAVED_IP=<server_ip.txt
     )
 )
-
-:: Проверяем наличие cmake и обновляем сборку если возможно
-where cmake >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    echo [1/2] Проверка и сборка последней версии StudentAgent...
-    if not exist "build" (
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-    )
-    cmake --build build --config Debug --target StudentAgent >nul 2>&1
-)
-
-echo [2/2] Запуск Агента Студента в фоновом режиме...
-echo Логи записываются в log_run.txt
-echo Для открытия консоли используйте run_student_console.bat
+if "%SERVER_IP%"=="" set SERVER_IP=%SAVED_IP%
 
 if exist "build\Debug\StudentAgent.exe" (
     start "" "build\Debug\StudentAgent.exe" %SERVER_IP%
@@ -34,6 +25,21 @@ if exist "build\Release\StudentAgent.exe" (
     start "" "build\Release\StudentAgent.exe" %SERVER_IP%
     exit /b 0
 )
+if exist "bin\StudentAgent.exe" (
+    start "" "bin\StudentAgent.exe" %SERVER_IP%
+    exit /b 0
+)
 
-echo [ERROR] StudentAgent.exe not found! Please run build.bat first.
+:: Если исполняемый файл еще не был скомпилирован — собираем
+echo [ClassroomMonitor] Первый запуск: сборка StudentAgent...
+call build.bat
+if exist "build\Debug\StudentAgent.exe" (
+    start "" "build\Debug\StudentAgent.exe" %SERVER_IP%
+    exit /b 0
+)
+if exist "build\Release\StudentAgent.exe" (
+    start "" "build\Release\StudentAgent.exe" %SERVER_IP%
+    exit /b 0
+)
+
 pause

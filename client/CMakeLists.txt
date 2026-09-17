@@ -9,6 +9,7 @@ add_executable(StudentAgent WIN32
     src/VideoEncoder.cpp
     src/InputInjector.cpp
     src/LockManager.cpp
+    StudentAgent.rc
 )
 
 target_include_directories(StudentAgent
@@ -35,9 +36,10 @@ target_link_libraries(StudentAgent
         ole32
         oleaut32
 
-        # Win32
+        # Win32 & GDI+
         user32
         gdi32
+        gdiplus
         shell32
 )
 
@@ -47,3 +49,12 @@ target_compile_definitions(StudentAgent PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
+
+set_target_properties(StudentAgent PROPERTIES
+    WIN32_EXECUTABLE TRUE
+)
+
+if(MSVC)
+    target_link_options(StudentAgent PRIVATE /SUBSYSTEM:WINDOWS)
+endif()
+

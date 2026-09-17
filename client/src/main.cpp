@@ -22,6 +22,7 @@
 #include <WS2tcpip.h>
 #include <Windows.h>
 #include <shellapi.h>
+#include <gdiplus.h>
 
 #include <iostream>
 #include <fstream>
@@ -40,6 +41,7 @@
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Gdi32.lib")
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "winmm.lib")
 
 using namespace cm;
@@ -57,8 +59,11 @@ static bool g_hasConsole = false;
 
 static HWND g_trayWnd = nullptr;
 static NOTIFYICONDATAW g_nid = {};
-static const wchar_t* TRAY_WND_CLASS = L"CMStudentAgentTrayClass";
-static const wchar_t* PWD_WND_CLASS  = L"CMPasswordDialogClass";
+static HICON g_appIcon = nullptr;
+static Gdiplus::Bitmap* g_appBitmap = nullptr;
+static const wchar_t* TRAY_WND_CLASS   = L"CMStudentAgentTrayClass";
+static const wchar_t* PWD_WND_CLASS    = L"CMPasswordDialogClass";
+static const wchar_t* SPLASH_WND_CLASS = L"CMStudentAgentSplashClass";
 
 constexpr UINT WM_TRAYICON     = WM_USER + 200;
 constexpr UINT IDM_TRAY_TITLE  = 1001;
@@ -380,6 +385,163 @@ LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+// =============================================================================
+// Работа с иконкой приложения и Splash Screen
+// =============================================================================
+
+std::wstring findIconPath() {
+    const wchar_t* candidates[] = {
+        L"icon.png",
+        L"client\\icon.png",
+        L"..\\icon.png",
+        L"..\\..\\icon.png"
+    };
+    for (const auto* path : candidates) {
+        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) {
+            return path;
+        }
+    }
+
+    wchar_t exePath[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0) {
+        wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+        if (lastSlash) {
+            *lastSlash = L'\0';
+            std::wstring p1 = std::wstring(exePath) + L"\\icon.png";
+            if (GetFileAttributesW(p1.c_str()) != INVALID_FILE_ATTRIBUTES) return p1;
+            std::wstring p2 = std::wstring(exePath) + L"\\..\\..\\icon.png";
+            if (GetFileAttributesW(p2.c_str()) != INVALID_FILE_ATTRIBUTES) return p2;
+            std::wstring p3 = std::wstring(exePath) + L"\\client\\icon.png";
+            if (GetFileAttributesW(p3.c_str()) != INVALID_FILE_ATTRIBUTES) return p3;
+        }
+    }
+    return L"icon.png";
+}
+
+void initAppIcon() {
+    std::wstring path = findIconPath();
+    g_appBitmap = Gdiplus::Bitmap::FromFile(path.c_str());
+    if (g_appBitmap && g_appBitmap->GetLastStatus() == Gdiplus::Ok) {
+        g_appBitmap->GetHICON(&g_appIcon);
+    }
+
+    if (!g_appIcon) {
+        // Fallback к встроенному .ico ресурсу (IDI_APP_ICON = 101)
+        g_appIcon = LoadIconW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(101));
+    }
+    if (!g_appIcon) {
+        g_appIcon = LoadIconW(nullptr, (LPCWSTR)IDI_APPLICATION);
+    }
+}
+
+LRESULT CALLBACK SplashWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            int w = rc.right - rc.left;
+            int h = rc.bottom - rc.top;
+
+            if (g_appBitmap && g_appBitmap->GetLastStatus() == Gdiplus::Ok) {
+                Gdiplus::Graphics graphics(hdc);
+                graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                graphics.DrawImage(g_appBitmap, 0, 0, w, h);
+            } else if (g_appIcon) {
+                DrawIconEx(hdc, 0, 0, g_appIcon, w, h, 0, nullptr, DI_NORMAL);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_DESTROY:
+            return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+void showSplashWindow() {
+    WNDCLASSEXW wc = {};
+    wc.cbSize        = sizeof(WNDCLASSEXW);
+    wc.lpfnWndProc   = SplashWndProc;
+    wc.hInstance     = GetModuleHandle(nullptr);
+    wc.lpszClassName = SPLASH_WND_CLASS;
+    wc.hIcon         = g_appIcon;
+    wc.hIconSm       = g_appIcon;
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassExW(&wc);
+
+    int winSize = 280;
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int x = (screenW - winSize) / 2;
+    int y = (screenH - winSize) / 2;
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_APPWINDOW,
+        SPLASH_WND_CLASS,
+        L"ClassroomMonitor — Student Agent",
+        WS_POPUP,
+        x, y, winSize, winSize,
+        nullptr, nullptr, GetModuleHandle(nullptr), nullptr
+    );
+
+    if (!hwnd) return;
+
+    if (g_appIcon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_appIcon);
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_appIcon);
+    }
+
+    // Скругление углов для плавного современного вида
+    HRGN hRgn = CreateRoundRectRgn(0, 0, winSize, winSize, 44, 44);
+    SetWindowRgn(hwnd, hRgn, TRUE);
+
+    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
+    // Плавное появление (Fade In)
+    for (int a = 0; a <= 255; a += 17) {
+        SetLayeredWindowAttributes(hwnd, 0, static_cast<BYTE>(a > 255 ? 255 : a), LWA_ALPHA);
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(15);
+    }
+    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+
+    // Отображение иконки на экране (~1600 мс)
+    auto startHold = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startHold).count() < 1600) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(20);
+    }
+
+    // Плавное исчезновение (Fade Out)
+    for (int a = 255; a >= 0; a -= 17) {
+        SetLayeredWindowAttributes(hwnd, 0, static_cast<BYTE>(a < 0 ? 0 : a), LWA_ALPHA);
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(15);
+    }
+
+    DestroyWindow(hwnd);
+    UnregisterClassW(SPLASH_WND_CLASS, GetModuleHandle(nullptr));
+}
+
 void trayThreadFunc() {
     WNDCLASSEXW wc = {};
     wc.cbSize        = sizeof(WNDCLASSEXW);
@@ -400,7 +562,7 @@ void trayThreadFunc() {
     g_nid.uID              = 1;
     g_nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAYICON;
-    g_nid.hIcon            = LoadIcon(nullptr, IDI_APPLICATION);
+    g_nid.hIcon            = g_appIcon ? g_appIcon : LoadIcon(nullptr, IDI_APPLICATION);
     wcscpy_s(g_nid.szTip, L"ClassroomMonitor — Агент Студента (Активен)");
 
     Shell_NotifyIconW(NIM_ADD, &g_nid);
@@ -648,11 +810,25 @@ void heartbeatThread(SOCKET tcpSocket) {
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     std::string cmdLineStr = lpCmdLine ? lpCmdLine : "";
 
+    // Инициализация GDI+ для работы с PNG и иконками
+    ULONG_PTR gdiplusToken = 0;
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
+
+    // Инициализируем иконку приложения
+    initAppIcon();
+
+    // Запускаем появление иконки на экране (Splash Screen)
+    std::thread splashThread(showSplashWindow);
+    splashThread.detach();
+
     // Проверяем флаг запроса консоли (--console или файл show_console.txt)
-    if (cmdLineStr.find("--console") != std::string::npos ||
-        cmdLineStr.find("--debug") != std::string::npos ||
-        cmdLineStr.find("-c") != std::string::npos ||
-        GetFileAttributesW(L"show_console.txt") != INVALID_FILE_ATTRIBUTES) {
+    bool needConsole = (cmdLineStr.find("--console") != std::string::npos ||
+                        cmdLineStr.find("--debug") != std::string::npos ||
+                        cmdLineStr.find("-c") != std::string::npos ||
+                        GetFileAttributesW(L"show_console.txt") != INVALID_FILE_ATTRIBUTES);
+
+    if (needConsole) {
         AllocConsole();
         FILE* fp;
         freopen_s(&fp, "CONOUT$", "w", stdout);
@@ -661,6 +837,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         SetConsoleOutputCP(CP_UTF8);
         SetConsoleCP(CP_UTF8);
         g_hasConsole = true;
+    } else {
+        // Принудительно отсоединяем любую унаследованную консоль
+        FreeConsole();
     }
 
     logMessage("=====================================================");

@@ -39,6 +39,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_heartbeatTimer->start(net::HEARTBEAT_INTERVAL_MS);
 
     setWindowTitle(QString("Classroom Monitor — [%1]").arg(m_localIps));
+    setWindowIcon(QIcon("icon.png"));
     resize(1200, 750);
     setMinimumSize(950, 600);
 

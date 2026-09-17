@@ -27,6 +27,7 @@ add_executable(TeacherPanel WIN32
     include/server/ClientSidebar.h
     include/server/SettingsDialog.h
     include/server/MessageDialog.h
+    TeacherPanel.rc
 )
 
 target_include_directories(TeacherPanel
